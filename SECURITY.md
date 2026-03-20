@@ -25,7 +25,6 @@ We aim to acknowledge reports promptly, investigate them, and coordinate a fix a
 
 - Studio gateway settings are stored on disk in plaintext under the local OpenClaw state directory.
 - The current UI loads the configured upstream gateway URL/token into browser memory at runtime, even though those values are not stored in browser persistent storage.
-- The Studio access gate still supports a legacy query-parameter bootstrap flow for setting its access cookie when `STUDIO_ACCESS_TOKEN` is enabled.
 
 ## Scope
 

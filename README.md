@@ -6,6 +6,8 @@ A 3D workspace for AI agents.
 
 Claw3D turns AI automation into a visual workplace where agents collaborate, review code, run tests, train skills, and execute tasks inside a shared 3D environment.
 
+Built and maintained by LukeTheDev. Follow on X: [@iamlukethedev](https://x.com/iamlukethedev).
+
 Think of it as:
 
 An office for your AI team.
@@ -33,7 +35,6 @@ Claw3D is the visualization and interaction layer.
 
 In practical terms, this app gives you:
 
-- a focused `/agents` workspace for fleet management, chat, approvals, settings, and runtime monitoring
 - a live `/office` retro-office environment where agents appear as workers moving through a shared 3D world
 - an `/office/builder` surface for editing and publishing office layouts
 - a gateway-first architecture that keeps agent state in OpenClaw while Studio stores local UI preferences
@@ -77,11 +78,12 @@ Prerequisite:
 - Claw3D does not install, build, or run OpenClaw for you.
 - Before starting Claw3D, make sure your OpenClaw gateway is already running and that you know the gateway URL and token you want Studio to use.
 - This repository is the UI and Studio/proxy layer only.
+- If you need a full cross-machine setup guide (OpenClaw + Tailscale + Claw3D), follow [`TUTORIAL.md`](TUTORIAL.md).
 
 Run from source:
 
 ```bash
-git clone https://github.com/libinysolutions/openclaw-control-center.git claw3d
+git clone <your-public-repo-url> claw3d
 cd claw3d
 npm install
 cp .env.example .env
@@ -173,31 +175,23 @@ See [`.env.example`](.env.example) for the full local development template.
 - `npm run e2e` runs Playwright tests.
 - `npm run studio:setup` prepares common local Studio prerequisites.
 - `npm run smoke:dev-server` runs a basic dev-server smoke check.
-- `npm run office:assets` rebuilds office atlas assets.
 
 ## Documentation
 
 - [`VISION.md`](VISION.md): project direction and long-term guardrails.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md): system boundaries, data flow, and major trade-offs.
+- [`TUTORIAL.md`](TUTORIAL.md): detailed step-by-step setup for OpenClaw + Tailscale + Claw3D.
 - [`CODE_DOCUMENTATION.md`](CODE_DOCUMENTATION.md): practical code map, extension points, and contributor onboarding order.
-- [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md): current limitations and publication caveats.
-- [`THIRD_PARTY_ASSETS.md`](THIRD_PARTY_ASSETS.md): bundled asset provenance and open questions.
-- [`THIRD_PARTY_CODE.md`](THIRD_PARTY_CODE.md): vendored code and dependency disclosure notes.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md): local workflow, testing, and PR expectations.
 - [`SUPPORT.md`](SUPPORT.md): where to ask for help and how to route reports.
 - [`ROADMAP.md`](ROADMAP.md): near-term priorities and contributor-friendly work areas.
-- [`docs/ui-guide.md`](docs/ui-guide.md): current IA and user-facing Studio behavior.
 - [`docs/pi-chat-streaming.md`](docs/pi-chat-streaming.md): gateway runtime streaming and transcript rendering.
 - [`docs/permissions-sandboxing.md`](docs/permissions-sandboxing.md): Studio permissions and OpenClaw behavior.
-- [`docs/color-system.md`](docs/color-system.md): semantic color usage guidelines.
 
 ## Current Limitations
 
 - The immersive retro office (`/office`) and the Phaser builder (`/office/builder`) are related but still separate stacks.
-- Some bundled assets and one GitHub-sourced dependency are still documented as redistributability follow-ups rather than fully cleared artifacts.
-- The Studio access gate currently supports a legacy one-time query bootstrap flow for setting its cookie. Avoid using it on shared machines and clear browser history if you do.
 - The app keeps gateway secrets out of browser persistent storage, but the current connection flow still loads the upstream URL/token into browser memory at runtime.
-- The repo still has known lint, test, build, and smoke-check blockers documented in `KNOWN_ISSUES.md`.
 
 ## Troubleshooting
 
@@ -205,11 +199,17 @@ If the UI loads but Connect fails, the problem is usually on the Studio -> Gatew
 
 - Confirm the upstream URL and token in Studio settings.
 - `EPROTO` or `wrong version number` usually means `wss://` was used against a non-TLS endpoint.
-- `401 Studio access token required` usually means `STUDIO_ACCESS_TOKEN` is enabled; the current bootstrap flow uses a one-time query parameter to set an HttpOnly cookie. Treat that as a temporary local-admin flow and avoid sharing the resulting URL.
+- `401 Studio access token required` usually means `STUDIO_ACCESS_TOKEN` is enabled and the request is missing the expected `studio_access` cookie.
 - Helpful proxy error codes include `studio.gateway_url_missing`, `studio.gateway_token_missing`, `studio.upstream_error`, and `studio.upstream_closed`.
 
 ## Contributing
 
 Keep pull requests focused, run `npm run lint`, `npm run typecheck`, and `npm run test` before opening a PR, and update docs when behavior or architecture changes.
+
+## AI Editing Guardrails
+
+If you use Cursor or another AI-assisted workflow, review the committed project guardrails in [`.cursor/rules/claw3d-project-guardrails.mdc`](.cursor/rules/claw3d-project-guardrails.mdc).
+
+That rule file captures the shared editing expectations for this repository, including the Claw3D-vs-OpenClaw boundary, code placement conventions, office-stack distinctions, and documentation/test update expectations.
 
 Community expectations live in [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md). Security reporting instructions live in [`SECURITY.md`](SECURITY.md).

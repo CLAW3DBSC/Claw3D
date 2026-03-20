@@ -4,7 +4,13 @@ All notable changes to Claw3D will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows Semantic Versioning where practical.
 
-## [0.1.0] - 2026-03-17
+## [0.1.0] - 2026-03-19
+
+### Added
+
+- Uploaded entire repo
+
+## [0.1.0] - 2026-03-16
 
 ### Added
 
