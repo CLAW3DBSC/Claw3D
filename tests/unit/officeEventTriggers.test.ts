@@ -182,6 +182,70 @@ describe("office event triggers", () => {
     );
   });
 
+  it("latches cat lounge holds from runtime chat user commands", () => {
+    const agents = [
+      makeAgent({
+        agentId: "worker",
+        name: "Worker",
+        sessionKey: "agent:worker:main",
+      }),
+    ];
+    const afterCat = reduceOfficeAnimationTriggerEvent({
+      state: createOfficeAnimationTriggerState(),
+      agents,
+      nowMs: 9_000,
+      event: {
+        type: "event",
+        event: "chat",
+        payload: {
+          runId: "run-worker",
+          sessionKey: "agent:worker:main",
+          state: "final",
+          message: {
+            role: "user",
+            text: "Go pet Garfield.",
+          },
+        },
+      },
+    });
+    const animationState = buildOfficeAnimationState({
+      state: afterCat,
+      agents,
+      nowMs: 9_500,
+    });
+
+    expect(afterCat.catUntilByAgentId.worker).toBeGreaterThanOrEqual(11_000);
+    expect(afterCat.catUntilByAgentId.worker).toBeLessThanOrEqual(69_000);
+    expect(animationState.catHoldByAgentId.worker).toBe(true);
+  });
+
+  it("does not re-latch expired cat hold without a new cat command", () => {
+    const agents = [
+      makeAgent({
+        agentId: "worker",
+        name: "Worker",
+        sessionKey: "agent:worker:main",
+        lastUserMessage: "Go pet Garfield.",
+      }),
+    ];
+
+    const state = reconcileOfficeAnimationTriggerState({
+      state: {
+        ...createOfficeAnimationTriggerState(),
+        lastManualCatCommandKeyByAgentId: {
+          worker: "latest:go pet garfield.",
+        },
+        catUntilByAgentId: {
+          worker: 10_000,
+        },
+      },
+      agents,
+      nowMs: 50_000,
+    });
+
+    expect(state.catUntilByAgentId.worker).toBeUndefined();
+  });
+
   it("treats final transport chat messages without an explicit user role as commands", () => {
     const agents = [
       makeAgent({

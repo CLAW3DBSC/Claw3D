@@ -1,4 +1,19 @@
 import type { AgentAvatarProfile } from "@/lib/avatars/profile";
+import type { ZooSpecies } from "@/lib/office/catTopia";
+
+export type OfficeCatPattern = "solid" | "patchy" | "spotted" | "tabby";
+
+export type OfficeCatFurLength = "short" | "long";
+
+export type OfficeCatAppearance = {
+  baseCoatColor: string;
+  accentCoatColor: string;
+  eyeColor: string;
+  pattern: OfficeCatPattern;
+  furLength: OfficeCatFurLength;
+};
+
+export type OfficeAnimalAppearance = OfficeCatAppearance;
 
 export type OfficeAgent = {
   id: string;
@@ -6,6 +21,11 @@ export type OfficeAgent = {
   status: "working" | "idle" | "error";
   color: string;
   item: string;
+  avatarKind?: "human" | "cat" | "animal";
+  activityMultiplier?: number;
+  animalSpecies?: ZooSpecies;
+  animalAppearance?: OfficeAnimalAppearance;
+  catAppearance?: OfficeCatAppearance;
   avatarProfile?: AgentAvatarProfile | null;
 };
 
@@ -50,6 +70,9 @@ export type RenderAgent = SceneActor & {
   pingPongTableUid?: string;
   pingPongSide?: 0 | 1;
   pingPongPreviousWalkSpeed?: number;
+  elevationOffset?: number;
+  catPerchStage?: "approach" | "climb" | "perched";
+  catPerchKey?: string;
   interactionTarget?:
     | "desk"
     | "server_room"
@@ -57,7 +80,8 @@ export type RenderAgent = SceneActor & {
     | "gym"
     | "qa_lab"
     | "sms_booth"
-    | "phone_booth";
+    | "phone_booth"
+    | "cat_lounge";
   smsBoothStage?: "door_outer" | "door_inner" | "typing";
   phoneBoothStage?: "door_outer" | "door_inner" | "receiver";
   serverRoomStage?: "door_outer" | "door_inner" | "terminal";

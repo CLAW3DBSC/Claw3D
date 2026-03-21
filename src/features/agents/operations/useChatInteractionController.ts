@@ -62,6 +62,7 @@ export function useChatInteractionController(
   const activeQueueSendAgentIdsRef = useRef<Set<string>>(new Set());
   const flushLivePatchesRef = useRef<() => void>(() => {});
   const livePatchBatcherRef = useRef(createRafBatcher(() => flushLivePatchesRef.current()));
+  const queuedRecoveryAtByAgentIdRef = useRef<Map<string, number>>(new Map());
 
   useEffect(() => {
     stopBusyAgentIdRef.current = stopBusyAgentId;
@@ -207,7 +208,8 @@ export function useChatInteractionController(
         });
         return;
       }
-      if (agent.status === "running") {
+      const activeRunId = agent.runId?.trim() ?? "";
+      if (agent.status === "running" && activeRunId) {
         params.dispatch({
           type: "enqueueQueuedMessage",
           agentId,
@@ -270,10 +272,79 @@ export function useChatInteractionController(
   useEffect(() => {
     if (params.status !== "connected") return;
     for (const agent of params.agents) {
-      if (agent.status !== "idle") continue;
+      const activeRunId = agent.runId?.trim() ?? "";
+      const canDrainQueue =
+        agent.status === "idle" || (agent.status === "running" && activeRunId.length === 0);
       const nextMessage = agent.queuedMessages?.[0];
       if (!nextMessage) continue;
       if (activeQueueSendAgentIdsRef.current.has(agent.agentId)) continue;
+
+      if (!canDrainQueue && agent.status === "running" && activeRunId.length > 0) {
+        const nowMs = Date.now();
+        const lastRecoveryMs = queuedRecoveryAtByAgentIdRef.current.get(agent.agentId) ?? 0;
+        if (nowMs - lastRecoveryMs < 2_000) continue;
+        queuedRecoveryAtByAgentIdRef.current.set(agent.agentId, nowMs);
+        activeQueueSendAgentIdsRef.current.add(agent.agentId);
+        void (async () => {
+          try {
+            try {
+              const result = (await params.client.call("agent.wait", {
+                runId: activeRunId,
+                timeoutMs: 1,
+              })) as { status?: unknown };
+              const status = typeof result?.status === "string" ? result.status : "";
+              if (status !== "ok" && status !== "error") return;
+              params.clearRunTracking(activeRunId);
+              params.dispatch({
+                type: "updateAgent",
+                agentId: agent.agentId,
+                patch: {
+                  status: status === "error" ? "error" : "idle",
+                  runId: null,
+                  runStartedAt: null,
+                  streamText: null,
+                  thinkingTrace: null,
+                },
+              });
+              await sendNextQueuedMessage({
+                agentId: agent.agentId,
+                sessionKey: agent.sessionKey,
+                nextMessage,
+              });
+              return;
+            } catch (err) {
+              const message = err instanceof Error ? err.message.toLowerCase() : "";
+              const missingRun =
+                message.includes("not found") ||
+                message.includes("unknown run") ||
+                message.includes("run not found");
+              if (!missingRun) return;
+              params.clearRunTracking(activeRunId);
+              params.dispatch({
+                type: "updateAgent",
+                agentId: agent.agentId,
+                patch: {
+                  status: "idle",
+                  runId: null,
+                  runStartedAt: null,
+                  streamText: null,
+                  thinkingTrace: null,
+                },
+              });
+              await sendNextQueuedMessage({
+                agentId: agent.agentId,
+                sessionKey: agent.sessionKey,
+                nextMessage,
+              });
+            }
+          } finally {
+            activeQueueSendAgentIdsRef.current.delete(agent.agentId);
+          }
+        })();
+        continue;
+      }
+
+      if (!canDrainQueue) continue;
       activeQueueSendAgentIdsRef.current.add(agent.agentId);
       void (async () => {
         try {

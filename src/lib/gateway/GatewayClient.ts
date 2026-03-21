@@ -6,6 +6,7 @@ import {
   clearGatewayBrowserSessionStorage,
   type GatewayHelloOk,
 } from "./openclaw/GatewayBrowserClient";
+import { DEFAULT_MAIN_SESSION_KEY } from "@/lib/agents/constants";
 import type {
   StudioGatewaySettings,
   StudioSettings,
@@ -66,7 +67,7 @@ export const parseGatewayFrame = (raw: string): GatewayFrame | null => {
 
 export const buildAgentMainSessionKey = (agentId: string, mainKey: string) => {
   const trimmedAgent = agentId.trim();
-  const trimmedKey = mainKey.trim() || "main";
+  const trimmedKey = mainKey.trim() || DEFAULT_MAIN_SESSION_KEY;
   return `agent:${trimmedAgent}:${trimmedKey}`;
 };
 
@@ -522,6 +523,7 @@ export const useGatewayConnection = (
   const retryAttemptRef = useRef(0);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wasManualDisconnectRef = useRef(false);
+  const authRecoveryAttemptedRef = useRef(false);
 
   const [gatewayUrl, setGatewayUrl] = useState(DEFAULT_UPSTREAM_GATEWAY_URL);
   const [token, setToken] = useState("");
@@ -711,6 +713,40 @@ export const useGatewayConnection = (
     setError(null);
     setConnectErrorCode(null);
   }, []);
+
+  // If a saved token becomes stale (gateway token rotated), auto-heal by
+  // switching to current local defaults and retrying once.
+  useEffect(() => {
+    if (!settingsLoaded) return;
+    if (status !== "disconnected") return;
+    if (wasManualDisconnectRef.current) return;
+    if (!localGatewayDefaults) return;
+    if (authRecoveryAttemptedRef.current) return;
+
+    const authLikeError =
+      isAuthError(error) ||
+      connectErrorCode === "gateway_token_missing" ||
+      connectErrorCode === "studio.gateway_token_missing";
+    if (!authLikeError) return;
+
+    const defaultUrl = localGatewayDefaults.url.trim();
+    const currentUrl = gatewayUrl.trim();
+    const defaultToken = localGatewayDefaults.token;
+    const shouldAdoptDefaults = currentUrl !== defaultUrl || token !== defaultToken;
+    if (!shouldAdoptDefaults) return;
+
+    authRecoveryAttemptedRef.current = true;
+    setGatewayUrl(defaultUrl);
+    setToken(defaultToken);
+    setError(null);
+    setConnectErrorCode(null);
+  }, [connectErrorCode, error, gatewayUrl, localGatewayDefaults, settingsLoaded, status, token]);
+
+  useEffect(() => {
+    if (status === "connected") {
+      authRecoveryAttemptedRef.current = false;
+    }
+  }, [status]);
 
   const connectPromptReady = settingsLoaded;
   const shouldPromptForConnect =

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { TranscriptEntry } from "@/features/agents/state/transcript";
 import {
+  resolveOfficeCatDirective,
   reduceOfficeDeskHoldState,
   reduceOfficeQaHoldState,
   resolveOfficeIntentSnapshot,
@@ -93,6 +94,14 @@ describe("deskDirectives", () => {
     );
     expect(resolveOfficeQaDirective("done testing")).toBe("release");
     expect(resolveOfficeQaDirective("leave the QA lab")).toBe("release");
+  });
+
+  it("recognizes cat directives with broad cat vocabulary", () => {
+    expect(resolveOfficeCatDirective("Go pet the cat.")).toBe("cat_lounge");
+    expect(resolveOfficeCatDirective("Garfield needs pets")).toBe("cat_lounge");
+    expect(resolveOfficeCatDirective("the kitty is meowing")).toBe("cat_lounge");
+    expect(resolveOfficeCatDirective("kitten morale check")).toBe("cat_lounge");
+    expect(resolveOfficeCatDirective("this is catastrophic")).toBeNull();
   });
 
   it("rebuilds the QA lab hold from transcript history", () => {

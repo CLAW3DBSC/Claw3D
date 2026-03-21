@@ -1,4 +1,8 @@
 import { buildAgentMainSessionKey, isSameSessionKey } from "@/lib/gateway/GatewayClient";
+import {
+  DEFAULT_MAIN_SESSION_KEY,
+  RESERVED_MAIN_AGENT_ID,
+} from "@/lib/agents/constants";
 import { type GatewayModelPolicySnapshot } from "@/lib/gateway/models";
 import { type StudioSettings, type StudioSettingsPublic } from "@/lib/studio/settings";
 import {
@@ -81,9 +85,11 @@ const resolveAgentsListFromHelloSnapshot = (snapshot: unknown): AgentsListResult
       : agents.find((entry, index) => {
           const raw = rawAgents[index];
           return isRecord(raw) && raw.isDefault === true;
-        })?.id ?? agents[0]?.id ?? "main";
+        })?.id ?? agents[0]?.id ?? RESERVED_MAIN_AGENT_ID;
   const mainKey =
-    typeof sessionDefaults?.mainKey === "string" ? sessionDefaults.mainKey.trim() || "main" : "main";
+    typeof sessionDefaults?.mainKey === "string"
+      ? sessionDefaults.mainKey.trim() || DEFAULT_MAIN_SESSION_KEY
+      : DEFAULT_MAIN_SESSION_KEY;
   const scope =
     typeof sessionDefaults?.scope === "string" ? sessionDefaults.scope.trim() || undefined : undefined;
   return {
@@ -156,7 +162,7 @@ export async function hydrateAgentFleetFromGateway(params: {
       agentsResult = fallback;
     }
   }
-  const mainKey = agentsResult.mainKey?.trim() || "main";
+  const mainKey = agentsResult.mainKey?.trim() || DEFAULT_MAIN_SESSION_KEY;
 
   const mainSessionKeyByAgent = new Map<string, SessionsListEntry | null>();
   await Promise.all(

@@ -1,4 +1,5 @@
 import { GatewayResponseError, type GatewayClient } from "@/lib/gateway/GatewayClient";
+import { RESERVED_MAIN_AGENT_ID } from "@/lib/agents/constants";
 
 export type AgentHeartbeatActiveHours = {
   start: string;
@@ -78,7 +79,7 @@ export type GatewayAgentOverrides = {
   tools?: GatewayAgentToolsOverrides;
 };
 
-const DEFAULT_AGENT_ID = "main";
+const DEFAULT_AGENT_ID = RESERVED_MAIN_AGENT_ID;
 
 export const readConfigAgentList = (
   config: Record<string, unknown> | undefined

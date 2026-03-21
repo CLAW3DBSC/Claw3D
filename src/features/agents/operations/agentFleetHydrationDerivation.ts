@@ -1,5 +1,6 @@
 import { buildAgentMainSessionKey } from "@/lib/gateway/GatewayClient";
 import { createDefaultAgentAvatarProfile } from "@/lib/avatars/profile";
+import { DEFAULT_MAIN_SESSION_KEY } from "@/lib/agents/constants";
 import { resolveConfiguredModelKey, type GatewayModelPolicySnapshot } from "@/lib/gateway/models";
 import {
   resolveAgentAvatarProfile,
@@ -200,7 +201,7 @@ export const deriveHydrateAgentFleetResult = (
     });
   }
 
-  const mainKey = input.agentsResult.mainKey?.trim() || "main";
+  const mainKey = input.agentsResult.mainKey?.trim() || DEFAULT_MAIN_SESSION_KEY;
   const gatewayKey = input.gatewayUrl.trim();
 
   const needsSessionSettingsSync = new Set<string>();

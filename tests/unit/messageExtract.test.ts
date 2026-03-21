@@ -98,6 +98,41 @@ describe("message-extract", () => {
     expect(stripUiMetadata(built)).not.toContain("Execution approval policy:");
   });
 
+  it("unwraps control-ui adspirer wrapper payloads down to the timestamped command", () => {
+    const wrapped = `# Adspirer Ads Agent — Manage Ad Campaigns via Natural Language
+
+Sender (untrusted metadata):
+\`\`\`json
+{
+  "label": "openclaw-control-ui",
+  "id": "openclaw-control-ui"
+}
+\`\`\`
+
+[Sat 2026-03-21 03:05 PDT] Jarvis, ask Deven to develop a new SaaS business plan.`;
+
+    expect(buildAgentInstruction({ message: wrapped })).toBe(
+      "Jarvis, ask Deven to develop a new SaaS business plan.",
+    );
+  });
+
+  it("keeps internal runtime context payloads intact", () => {
+    const runtimeContext = `Sender (untrusted metadata):
+\`\`\`json
+{
+  "label": "openclaw-control-ui",
+  "id": "openclaw-control-ui"
+}
+\`\`\`
+
+[Sat 2026-03-21 03:06 PDT] OpenClaw runtime context (internal):
+This context is runtime-generated, not user-authored.`;
+
+    expect(buildAgentInstruction({ message: runtimeContext })).toContain(
+      "OpenClaw runtime context (internal):",
+    );
+  });
+
   it("strips leading system event blocks from queued session updates", () => {
     const raw = `System: [2026-02-12 01:09:16 UTC] Exec failed (mild-she, signal SIGKILL)
 

@@ -1,0 +1,206 @@
+# Cat Name Pool
+
+This editable list is used by the Claw3D cat colony spawner.
+
+Source seed notes (web search): Rover, The Spruce Pets, Chewy, PetMD cat-name collections.
+
+- Chairman Meow
+- Catrick Swayze
+- Meowrio
+- Purrlock Holmes
+- Fuzz Aldrin
+- Sir Pounce
+- Whisker Biscuit
+- Captain Floof
+- Miso Zoomies
+- Biscuit Bandit
+- Count Catula
+- The Great Catsby
+- Paw McCartney
+- Pawdrey Hepburn
+- Leonardo DiCatrio
+- Catniss Everclean
+- Obi-Wan Catnobi
+- Luke Skywhisker
+- Meowly Cyrus
+- Cat Damon
+- Meowzart
+- Kit-Kat Kittredge
+- DJ Scratchpaw
+- Sassy McFluff
+- Agent Purrkins
+- Pawl Rudd
+- Furrgie
+- Catpernicus
+- Clawdia
+- Cleocatra
+- Feline Dion
+- Catticus Finch
+- Purrsephone
+- Purrcival
+- Pawfessor Snuggles
+- Admiral Sniffles
+- Nacho Whiskers
+- Taco Bean
+- Noodle Nugget
+- Waffle Paws
+- Jellybean Jinx
+- Pickle Purr
+- Honey Biscuit
+- Peanut Wiggles
+- Pumpkin Zoom
+- Muffin Toes
+- Marshmallow Bandit
+- Butterbean
+- Cannoli Paws
+- Ravioli
+- Meatball Mew
+- Dumpling Duke
+- Sriracha Paws
+- Churro Chonk
+- Tater Tot
+- Macaroni Meow
+- Pepperoni
+- Bagel Boss
+- Mochi Mittens
+- Sundae Claws
+- Pudding Pop
+- Cookie Chaos
+- Brownie Blink
+- Cupcake Climber
+- Sprinkles
+- Poppyseed Purr
+- Boba Feta
+- Latte Paws
+- Espresso Bean
+- Mocha Whisker
+- Chai Biscuit
+- Cocoa Puff
+- Caramel Swirl
+- Maple Toes
+- Toffee Tail
+- Hazelnut Hop
+- Vanilla Vibes
+- Cinnamon Roll
+- Nutmeg Naps
+- Ginger Snap
+- Saffron Purr
+- Pepper Dash
+- Basil Bandit
+- Sage Whiskers
+- Clover Claws
+- Cricket Socks
+- Juniper Jumps
+- Willow Wiggle
+- Aspen Purr
+- Rowan Rumble
+- River Paws
+- Stormy Socks
+- Misty Mew
+- Sunny Bean
+- Dusk Doodle
+- Dawn Patrol
+- Lunar Loaf
+- Nova Nibbles
+- Comet Zoom
+- Orbit Paws
+- Galaxy Gizmo
+- Pixel Pouncer
+- Widget Whiskers
+- Circuit Cuddles
+- Gizmo Beans
+- Bytey
+- Kernel Kibble
+- Unix Whisker
+- Java Jumps
+- Python Paws
+- Ruby Rumble
+- Django Mew
+- Bash Biscuit
+- Cache Claws
+- Cookie Cache
+- Tabbytha
+- Felicity Fuzz
+- Mittens McGee
+- Boots McFluff
+- Socks OMalley
+- Whisker Waffles
+- Pounce de Leon
+- Snuggle Supreme
+- Floof Nugget
+- Chonk Norris
+- Sir Flopsalot
+- Lady Purrsalot
+- Duchess Biscuit
+- Baron von Meow
+- Queen Bean
+- King Toebeans
+- Prince Pounce
+- Princess Zoomie
+- Captain Chaos
+- Major Mittens
+- Sergeant Sniff
+- General Fuzz
+- Doctor Whiskers
+- Professor Paws
+- Nurse Nibbles
+- Judge Judywhiskers
+- Mayor Meowville
+- Sheriff Scratch
+- Deputy Biscuit
+- Ranger Rumble
+- Pilot Purr
+- Rocket Paw
+- Scout Snuggles
+- Sailor Squeak
+- Pirate Paws
+- Mermaid Miso
+- Ninja Noodle
+- Samurai Socks
+- Cowboy Cuddles
+- Rodeo Whiskers
+- Yeti Paws
+- Dragon Biscuit
+- Phoenix Fur
+- Kraken Kitten
+- Sphinx Snugs
+- Goblin Toes
+- Gnomey
+- Trolli Paws
+- Elfie Meow
+- Wizard Whiskers
+- Merlin Mitts
+- Gandalf the Greycat
+- Salem Snacks
+- Sabrina Claws
+- Binx Beans
+- Loki Loaf
+- Thor Paws
+- Freya Fuzz
+- Zeus Zoomie
+- Hera Hops
+- Apollo Purr
+- Athena Beans
+- Hermes Whiskers
+- Poseidon Paws
+- Pluto Purr
+- Neptune Naps
+- Venus Velvet
+- Mars Muffin
+- Saturn Socks
+- Jupiter Jumps
+- Mercury Mew
+- Eartha Kittycat
+- Bingo Bongo
+- Razzle Dazzle
+- Boop Snoot
+- Niblet Nugget
+- Wigglebottom
+- Fluffy McGee
+- Snickerdoodle
+- Goober Paws
+- Wobble Bean
+- Jitterbug
+- Bubbles Biscuit
+- Doodle Purr
+- Yoyo Meow

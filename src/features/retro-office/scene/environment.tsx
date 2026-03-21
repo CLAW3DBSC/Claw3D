@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { Text } from "@react-three/drei";
 import {
   CANVAS_H,
   CANVAS_W,
@@ -570,6 +571,112 @@ export function WallPictures() {
       />
 
       {null}
+    </group>
+  );
+}
+
+export type MemorialWallPortrait = {
+  id: string;
+  name: string;
+  species: string;
+  color: string;
+  accentColor: string;
+};
+
+const MEMORIAL_WALL_SLOTS: Array<{
+  position: [number, number, number];
+  rotY: number;
+}> = [
+  { position: [-9.2, 0.64, -7.12], rotY: 0 },
+  { position: [-8.25, 0.64, -7.12], rotY: 0 },
+  { position: [-7.3, 0.64, -7.12], rotY: 0 },
+  { position: [-6.35, 0.64, -7.12], rotY: 0 },
+  { position: [-5.4, 0.64, -7.12], rotY: 0 },
+  { position: [-4.45, 0.64, -7.12], rotY: 0 },
+  { position: [-3.5, 0.64, -7.12], rotY: 0 },
+  { position: [-2.55, 0.64, -7.12], rotY: 0 },
+  { position: [2.55, 0.64, -7.12], rotY: 0 },
+  { position: [3.5, 0.64, -7.12], rotY: 0 },
+  { position: [4.45, 0.64, -7.12], rotY: 0 },
+  { position: [5.4, 0.64, -7.12], rotY: 0 },
+  { position: [6.35, 0.64, -7.12], rotY: 0 },
+  { position: [7.3, 0.64, -7.12], rotY: 0 },
+  { position: [8.25, 0.64, -7.12], rotY: 0 },
+  { position: [9.2, 0.64, -7.12], rotY: 0 },
+  { position: [-9.2, 0.64, 7.12], rotY: Math.PI },
+  { position: [-8.25, 0.64, 7.12], rotY: Math.PI },
+  { position: [-7.3, 0.64, 7.12], rotY: Math.PI },
+  { position: [-6.35, 0.64, 7.12], rotY: Math.PI },
+  { position: [6.35, 0.64, 7.12], rotY: Math.PI },
+  { position: [7.3, 0.64, 7.12], rotY: Math.PI },
+  { position: [8.25, 0.64, 7.12], rotY: Math.PI },
+  { position: [9.2, 0.64, 7.12], rotY: Math.PI },
+];
+
+const truncatePortraitName = (value: string): string => {
+  const trimmed = value.trim();
+  if (trimmed.length <= 14) return trimmed;
+  return `${trimmed.slice(0, 11)}...`;
+};
+
+export function MemorialWallPictures({
+  portraits,
+}: {
+  portraits: MemorialWallPortrait[];
+}) {
+  if (!portraits.length) return null;
+  const visible = portraits.slice(-MEMORIAL_WALL_SLOTS.length);
+  return (
+    <group>
+      {visible.map((portrait, index) => {
+        const slot =
+          MEMORIAL_WALL_SLOTS[index % MEMORIAL_WALL_SLOTS.length] ??
+          MEMORIAL_WALL_SLOTS[0];
+        const initial = portrait.species.slice(0, 1).toUpperCase();
+        return (
+          <FramedPicture
+            key={portrait.id}
+            position={slot.position}
+            rotY={slot.rotY}
+            w={0.42}
+            h={0.5}
+            frameColor="#2a1a0a"
+            bgColor="#f8f4e8"
+            art={
+              <>
+                <mesh position={[0, 0.07, 0]}>
+                  <planeGeometry args={[0.26, 0.22]} />
+                  <meshBasicMaterial color={portrait.color} />
+                </mesh>
+                <mesh position={[0, -0.08, 0.001]}>
+                  <planeGeometry args={[0.31, 0.09]} />
+                  <meshBasicMaterial color={portrait.accentColor} />
+                </mesh>
+                <Text
+                  position={[0, 0.075, 0.004]}
+                  fontSize={0.1}
+                  maxWidth={0.22}
+                  anchorX="center"
+                  anchorY="middle"
+                  color="#111827"
+                >
+                  {initial}
+                </Text>
+                <Text
+                  position={[0, -0.06, 0.004]}
+                  fontSize={0.03}
+                  maxWidth={0.27}
+                  anchorX="center"
+                  anchorY="middle"
+                  color="#111827"
+                >
+                  {`RIP ${truncatePortraitName(portrait.name)}`}
+                </Text>
+              </>
+            }
+          />
+        );
+      })}
     </group>
   );
 }
