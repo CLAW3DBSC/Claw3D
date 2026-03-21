@@ -111,6 +111,12 @@ const BLOCKING_TYPES = new Set([
   "rowing_machine",
   "kettlebell_rack",
   "yoga_mat",
+  // Previously missing solid floor props (issue #4):
+  "water_cooler",    // freestanding floor appliance; agents were pathfinding through it
+  "server_terminal", // floor-standing terminal in the server room
+  "dishwasher",      // floor appliance in the kitchen
+  "easel",           // floor-standing art-room prop
+  "beanbag",         // floor seat; large enough to obstruct walking paths
 ]);
 
 export function buildNavGrid(furniture: FurnitureItem[]): NavGrid {
