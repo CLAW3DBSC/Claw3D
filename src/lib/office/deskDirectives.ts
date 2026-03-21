@@ -6,7 +6,7 @@ import { stripUiMetadata } from "@/lib/text/message-extract";
 // regex checks across chat, office, or scene code.
 export type OfficeDeskDirective = "desk" | "release";
 export type OfficeGithubDirective = "github" | "release";
-export type OfficeGymDirective = "gym";
+export type OfficeGymDirective = "gym" | "release";
 export type OfficeQaDirective = "qa_lab" | "release";
 export type OfficeStandupDirective = "standup";
 export type OfficeCallPhase = "needs_message" | "ready_to_call";
@@ -156,6 +156,16 @@ const resolveOfficeInteractionDirectiveFromNormalized = (
 const resolveOfficeGymSkillDirectiveFromNormalized = (
   normalized: string,
 ): OfficeGymDirective | null => {
+  const gymSkillReleasePatterns = [
+    /\bleave\s+(?:the\s+)?gym\b/,
+    /\bexit\s+(?:the\s+)?gym\b/,
+    /\bdone\s+(?:with\s+(?:the\s+)?)?(?:gym|skill(?:\s+building)?)\b/,
+    /\bstop\s+(?:working\s+on\s+)?skills?\b/,
+    /\bleave\s+the\s+skill(?:\s+building)?(?:\s+room)?\b/,
+  ];
+  if (gymSkillReleasePatterns.some((pattern) => pattern.test(normalized))) {
+    return "release";
+  }
   const skillIntentPatterns = [
     /\bskills?\b/,
     /\bskills?\s+marketplace\b/,
@@ -177,6 +187,16 @@ const resolveOfficeGymSkillDirectiveFromNormalized = (
 const resolveOfficeGymCommandDirectiveFromNormalized = (
   normalized: string,
 ): OfficeGymDirective | null => {
+  const gymCommandReleasePatterns = [
+    /\bleave\s+(?:the\s+)?gym\b/,
+    /\bexit\s+(?:the\s+)?gym\b/,
+    /\bdone\s+(?:with\s+(?:the\s+)?)?gym\b/,
+    /\bstop\s+gym(?:ning)?\b/,
+    /\bleave\s+skill(?:\s+building)?(?:\s+room)?\b/,
+  ];
+  if (gymCommandReleasePatterns.some((pattern) => pattern.test(normalized))) {
+    return "release";
+  }
   const gymCommandPatterns = [
     /\b(?:lets|let's)\s+go\s+to\s+the\s+gym\b/,
     /\b(?:lets|let's)\s+go\s+to\s+gym\b/,
