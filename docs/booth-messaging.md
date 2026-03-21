@@ -25,7 +25,7 @@ Telegram support designed and documented for contributors.
 | Phone Booth | Mock animation only | Real outbound calls via messaging provider |
 | SMS Booth | Mock animation only | Real SMS via messaging provider |
 | Booth UI | Small modal | Full-screen 3-column layout |
-| Provider support | Hardcoded Twilio | Pluggable (Twilio ✅ / WhatsApp 🔜 / Telegram 🔜) |
+| Provider support | Hardcoded Twilio | Pluggable (Twilio ✅ / WhatsApp ✅ / Telegram ✅) |
 | Contacts | None | localStorage contacts + call/SMS history |
 | Agent skill | None | `notify-owner` skill for autonomous notifications |
 
@@ -35,7 +35,7 @@ Telegram support designed and documented for contributors.
 
 ### 1 — Pick a provider and set env vars
 
-**Twilio** (default, fully implemented):
+**Twilio** (default — SMS + voice calls):
 
 ```bash
 # .env.local
@@ -49,6 +49,31 @@ TWILIO_PHONE_NUMBER=+15005550006   # your Twilio number
 Get your credentials at [console.twilio.com](https://console.twilio.com).
 A free trial account works — note that trial accounts prepend a notice to
 outbound calls before your message plays.
+
+**WhatsApp** (messages only — no calls):
+
+```bash
+MESSAGING_PROVIDER=whatsapp
+
+TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   # same Twilio account
+TWILIO_AUTH_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+TWILIO_WHATSAPP_NUMBER=whatsapp:+14155238886            # your WhatsApp sender
+```
+
+Get a WhatsApp-enabled sender at [console.twilio.com/develop/sms/whatsapp/senders](https://console.twilio.com/develop/sms/whatsapp/senders).
+
+**Telegram** (messages only — no calls):
+
+```bash
+MESSAGING_PROVIDER=telegram
+
+TELEGRAM_BOT_TOKEN=123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ
+TELEGRAM_CHAT_ID=123456789
+```
+
+1. Create a bot with [@BotFather](https://t.me/BotFather) on Telegram → get the token
+2. Start a conversation with your bot
+3. Fetch `https://api.telegram.org/bot<TOKEN>/getUpdates` → find your `chat_id`
 
 ### 2 — (Optional) Owner notification route
 
@@ -125,12 +150,15 @@ MESSAGING_PROVIDER=telegram   → Telegram (not yet implemented)
 
 ### Provider support matrix
 
-| Provider | SMS | Call | Status | Notes |
+| Provider | Message | Call | Status | Notes |
 |---|---|---|---|---|
-| `twilio` | ✅ | ✅ | Implemented | Twilio REST API |
-| `whatsapp` | 🔜 | 🔜 | Planned | Via Twilio WhatsApp or Meta Cloud API |
-| `telegram` | 🔜 | — | Planned | Telegram Bot API |
-| `imessage` | — | — | Not planned | No public API for outbound messages |
+| `twilio` | ✅ | ✅ | Implemented | Twilio REST API — SMS + voice |
+| `whatsapp` | ✅ | ❌ | Implemented | Twilio WhatsApp API |
+| `telegram` | ✅ | ❌ | Implemented | Telegram Bot API |
+| `imessage` | ❌ | ❌ | Not supported | No public Apple API |
+
+Calls are only available via Twilio — WhatsApp and Telegram do not expose
+programmatic outbound call APIs.
 
 ### Adding a new provider
 
@@ -165,6 +193,8 @@ relevant API links and env var shapes as a starting point.
 |---|---|
 | `src/lib/office/twilio.ts` | Twilio REST client. `sendSms()`, `makeCall()`, `normalizePhoneNumber()`. Reads all credentials from env vars. |
 | `src/lib/office/messagingProviders.ts` | Provider abstraction. `dispatchSendSms()`, `dispatchMakeCall()`, provider status helpers. |
+| `src/lib/office/providers/whatsapp.ts` | WhatsApp provider via Twilio WhatsApp API. Requires `TWILIO_WHATSAPP_NUMBER`. |
+| `src/lib/office/providers/telegram.ts` | Telegram provider via Bot API. Requires `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID`. |
 | `src/lib/office/boothContacts.ts` | localStorage contacts (`claw3d-booth-contacts`) and history (`claw3d-booth-history`, capped at 50). |
 | `src/features/office/dialogs/BoothInputDialog.tsx` | Full-screen booth input UI shared by Phone and SMS booths. |
 | `skills/notify-owner/SKILL.md` | OpenClaw skill — teaches agents to send owner notifications. |
@@ -250,13 +280,21 @@ If the key is not set, the booth animation plays silently.
 ## Full environment variable reference
 
 ```bash
-# ── Required for live messaging ───────────────────────────────────────────────
+# ── Messaging provider ────────────────────────────────────────────────────────
 MESSAGING_PROVIDER=twilio          # twilio (default) | whatsapp | telegram
 
-# Twilio
+# ── Twilio (SMS + calls) ──────────────────────────────────────────────────────
 TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 TWILIO_AUTH_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 TWILIO_PHONE_NUMBER=+15005550006
+
+# ── WhatsApp via Twilio (messages only) ───────────────────────────────────────
+# Uses same TWILIO_ACCOUNT_SID + TWILIO_AUTH_TOKEN
+TWILIO_WHATSAPP_NUMBER=whatsapp:+14155238886
+
+# ── Telegram (messages only) ──────────────────────────────────────────────────
+TELEGRAM_BOT_TOKEN=123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ
+TELEGRAM_CHAT_ID=123456789
 
 # ── Optional ──────────────────────────────────────────────────────────────────
 OWNER_PHONE_NUMBER=+1555...        # for /api/agent/notify — never exposed
@@ -265,15 +303,6 @@ OWNER_PHONE_NUMBER=+1555...        # for /api/agent/notify — never exposed
 ELEVENLABS_API_KEY=sk_...
 ELEVENLABS_VOICE_ID=...
 ELEVENLABS_MODEL_ID=eleven_flash_v2_5
-
-# WhatsApp (planned)
-# TWILIO_WHATSAPP_NUMBER=whatsapp:+14155238886
-# META_WHATSAPP_TOKEN=
-# META_WHATSAPP_PHONE_NUMBER_ID=
-
-# Telegram (planned)
-# TELEGRAM_BOT_TOKEN=
-# TELEGRAM_CHAT_ID=
 ```
 
 All sensitive values go in `.env.local` (gitignored). Never commit real credentials.
