@@ -91,7 +91,7 @@ Calls use inline TwiML with `<Say voice="alice" language="fr-FR">`. `normalizePh
 ### Voice transcription (`src/lib/openclaw/voiceTranscription.ts`)
 
 Calls the **whisper CLI** directly (OpenClaw 2026.3.13 removed the `runner-*.js` pattern). Configurable via:
-- `WHISPER_BIN` (default `/home/sarcome/.local/bin/whisper`)
+- `WHISPER_BIN` (default: `whisper` resolved from PATH)
 - `WHISPER_MODEL` (default `base`)
 
 ### Contacts & history (`src/lib/office/boothContacts.ts`)
@@ -141,24 +141,14 @@ WebSocket client that streams `EventFrame` objects from the OpenClaw gateway. Se
 
 ## Environment variables
 
-See `.env.example` for the base set. `.env.local` adds:
+See `.env.example` for the full reference. Key vars to add in `.env.local`:
 
 ```
-GITHUB_CURRENT_REPO=SarcomeLabs/mission-control
-OPENCLAW_PACKAGE_ROOT=/home/sarcome/.npm-global/lib/node_modules/openclaw
 TWILIO_ACCOUNT_SID=...
 TWILIO_AUTH_TOKEN=...
 TWILIO_PHONE_NUMBER=...
 OWNER_PHONE_NUMBER=...          # owner's personal number — agents notify route only
-WHISPER_BIN=/home/sarcome/.local/bin/whisper   # optional
+WHISPER_BIN=/path/to/whisper   # optional, defaults to whisper in PATH
 WHISPER_MODEL=base              # optional
+GITHUB_CURRENT_REPO=owner/repo # optional, overrides git remote detection
 ```
-
-## Git remotes
-
-| Remote | Repo | Role |
-|---|---|---|
-| `origin` | `iamlukethedev/Claw3D` | Upstream public fork |
-| `sarcome` | `SarcomeLabs/claw3d` | Private deployment repo |
-
-Push to the private repo: `git push sarcome main` (uses `gh` SSH auth as `SarcomeLabs`).
