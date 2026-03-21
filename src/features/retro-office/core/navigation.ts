@@ -300,6 +300,15 @@ export function astar(
       }
       const nextIndex = nextRow * GRID_COLS + nextColumn;
       if (visited[nextIndex] || grid[nextIndex]) continue;
+
+      // For diagonal moves, require both orthogonal neighbours to be free so
+      // agents cannot clip through the corner of a blocked cell (issue #6).
+      // E.g. moving NE (dc=+1, dr=-1) requires N (dc=0, dr=-1) and E (dc=+1, dr=0) to be clear.
+      if (columnOffset !== 0 && rowOffset !== 0) {
+        const orthogonalA = (currentRow + rowOffset) * GRID_COLS + currentColumn;
+        const orthogonalB = currentRow * GRID_COLS + (currentColumn + columnOffset);
+        if (grid[orthogonalA] || grid[orthogonalB]) continue;
+      }
       const nextCost = gCost[current] + cost;
       if (nextCost < gCost[nextIndex]) {
         gCost[nextIndex] = nextCost;
