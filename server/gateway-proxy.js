@@ -30,6 +30,9 @@ const injectAuthToken = (params, token) => {
   const auth = isObject(next.auth) ? { ...next.auth } : {};
   auth.token = token;
   next.auth = auth;
+  if (Object.prototype.hasOwnProperty.call(next, "device")) {
+    delete next.device;
+  }
   return next;
 };
 
@@ -131,13 +134,15 @@ function createGatewayProxy(options) {
     };
 
     const forwardConnectFrame = (frame) => {
-      const browserHasAuth =
+      const browserHasCredentialAuth =
         hasNonEmptyToken(frame.params) ||
         hasNonEmptyPassword(frame.params) ||
-        hasNonEmptyDeviceToken(frame.params) ||
-        hasCompleteDeviceAuth(frame.params);
+        hasNonEmptyDeviceToken(frame.params);
+      const browserHasCompleteDeviceAuth = hasCompleteDeviceAuth(frame.params);
+      const browserHasExplicitAuth =
+        browserHasCredentialAuth || (!upstreamToken && browserHasCompleteDeviceAuth);
 
-      if (!upstreamToken && !browserHasAuth) {
+      if (!upstreamToken && !browserHasExplicitAuth) {
         sendConnectError(
           "studio.gateway_token_missing",
           "Upstream gateway token is not configured on the Studio host."
@@ -145,12 +150,14 @@ function createGatewayProxy(options) {
         return;
       }
 
-      const connectFrame = browserHasAuth
-        ? frame
-        : {
+      // When Studio has an upstream token, enforce it regardless of browser-provided
+      // credentials. This prevents stale browser tokens from causing reconnect loops.
+      const connectFrame = upstreamToken
+        ? {
             ...frame,
             params: injectAuthToken(frame.params, upstreamToken),
-          };
+          }
+        : frame;
       upstreamWs.send(JSON.stringify(connectFrame));
     };
 

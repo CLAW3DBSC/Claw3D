@@ -34,6 +34,33 @@ export type AgentInstructionParams = {
   message: string;
 };
 
+const CONTROL_UI_METADATA_RE = /Sender \(untrusted metadata\):[\s\S]*?openclaw-control-ui/i;
+const ADSPIRER_WRAPPER_HEADER_RE = /^#\s*Adspirer Ads Agent\b/im;
+const CONTROL_UI_TIMESTAMPED_LINE_RE =
+  /^\[[A-Za-z]{3}\s+\d{4}-\d{2}-\d{2}[^\]]*]\s*(.+)$/gm;
+const INTERNAL_RUNTIME_CONTEXT_RE = /OpenClaw runtime context \(internal\):/i;
+
+const unwrapControlUiPayload = (text: string): string => {
+  const trimmed = text.trim();
+  if (!trimmed) return trimmed;
+
+  const looksWrappedByControlUi =
+    CONTROL_UI_METADATA_RE.test(trimmed) || ADSPIRER_WRAPPER_HEADER_RE.test(trimmed);
+  if (!looksWrappedByControlUi) return trimmed;
+  if (INTERNAL_RUNTIME_CONTEXT_RE.test(trimmed)) return trimmed;
+
+  let lastCandidate: string | null = null;
+  for (const match of trimmed.matchAll(CONTROL_UI_TIMESTAMPED_LINE_RE)) {
+    const candidate = (match[1] ?? "").trim();
+    if (!candidate) continue;
+    if (/^OpenClaw runtime context \(internal\):/i.test(candidate)) continue;
+    if (/^Current time:/i.test(candidate)) continue;
+    lastCandidate = candidate;
+  }
+
+  return lastCandidate ?? trimmed;
+};
+
 const EXEC_APPROVAL_WAIT_POLICY = [
   "Execution approval policy:",
   "- If any tool result says approval is required or pending, stop immediately.",
@@ -506,7 +533,7 @@ export const parseToolMarkdown = (
 export const buildAgentInstruction = ({
   message,
 }: AgentInstructionParams): string => {
-  return message.trim();
+  return unwrapControlUiPayload(message);
 };
 
 const PROJECT_PROMPT_BLOCK_RE = /^(?:Project|Workspace) path:[\s\S]*?\n\s*\n/i;

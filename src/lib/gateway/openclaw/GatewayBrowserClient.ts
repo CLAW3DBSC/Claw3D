@@ -469,22 +469,33 @@ export class GatewayBrowserClient {
     const isSecureContext =
       !this.opts.disableDeviceAuth && typeof crypto !== "undefined" && !!crypto.subtle;
 
-    const scopes = ["operator.admin", "operator.approvals", "operator.pairing"];
+    const scopes = [
+      "operator.admin",
+      "operator.approvals",
+      "operator.pairing",
+      "operator.read",
+      "operator.write",
+    ];
     const role = "operator";
     const authScopeKey = normalizeAuthScope(this.opts.authScopeKey ?? this.opts.url);
     let deviceIdentity: Awaited<ReturnType<typeof loadOrCreateDeviceIdentity>> | null = null;
     let canFallbackToShared = false;
-    let authToken = this.opts.token;
+    const sharedToken =
+      typeof this.opts.token === "string" && this.opts.token.trim().length > 0
+        ? this.opts.token
+        : undefined;
+    const useDeviceAuth = isSecureContext && !sharedToken;
+    let authToken = sharedToken;
 
-    if (isSecureContext) {
+    if (useDeviceAuth) {
       deviceIdentity = await loadOrCreateDeviceIdentity();
       const storedToken = loadDeviceAuthToken({
         deviceId: deviceIdentity.deviceId,
         role,
         scope: authScopeKey,
       })?.token;
-      authToken = storedToken ?? this.opts.token;
-      canFallbackToShared = Boolean(storedToken && this.opts.token);
+      authToken = sharedToken ?? storedToken;
+      canFallbackToShared = Boolean(storedToken && sharedToken && authToken === storedToken);
     }
     const auth =
       authToken || this.opts.password
@@ -504,7 +515,7 @@ export class GatewayBrowserClient {
         }
       | undefined;
 
-    if (isSecureContext && deviceIdentity) {
+    if (useDeviceAuth && deviceIdentity) {
       const signedAtMs = Date.now();
       const nonce = this.connectNonce ?? undefined;
       const payload = buildDeviceAuthPayload({

@@ -2,8 +2,9 @@ import {
   resolveMutationStartGuard,
   type MutationStartGuardResult,
 } from "@/features/agents/operations/mutationLifecycleWorkflow";
+import { RESERVED_MAIN_AGENT_ID } from "@/lib/agents/constants";
 
-export const RESERVED_MAIN_AGENT_ID = "main";
+export { RESERVED_MAIN_AGENT_ID };
 
 type GuardedActionKind =
   | "delete-agent"

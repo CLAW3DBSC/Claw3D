@@ -120,13 +120,12 @@ import {
   type SettingsRouteTab,
 } from "@/features/agents/operations/settingsRouteWorkflow";
 import { useSettingsRouteController } from "@/features/agents/operations/useSettingsRouteController";
+import { RESERVED_MAIN_AGENT_ID } from "@/lib/agents/constants";
 
 const PENDING_EXEC_APPROVAL_PRUNE_GRACE_MS = 500;
 
 type MobilePane = "fleet" | "chat";
 type SettingsSidebarItem = SettingsRouteTab;
-
-const RESERVED_MAIN_AGENT_ID = "main";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value && typeof value === "object" && !Array.isArray(value));
