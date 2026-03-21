@@ -50,9 +50,9 @@ async function main() {
     },
     allowWs: (req) => {
       if (resolvePathname(req.url) !== "/api/gateway/ws") return false;
-      if (!accessGate.allowUpgrade(req)) return false;
       return true;
     },
+    verifyClient: (info) => accessGate.allowUpgrade(info.req),
   });
 
   await app.prepare();

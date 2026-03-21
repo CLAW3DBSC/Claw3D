@@ -87,11 +87,13 @@ function createGatewayProxy(options) {
     logError = (msg, err) => console.error(msg, err),
   } = options || {};
 
+  const { verifyClient } = options || {};
+
   if (typeof loadUpstreamSettings !== "function") {
     throw new Error("createGatewayProxy requires loadUpstreamSettings().");
   }
 
-  const wss = new WebSocketServer({ noServer: true });
+  const wss = new WebSocketServer({ noServer: true, verifyClient });
 
   wss.on("connection", (browserWs) => {
     let upstreamWs = null;
