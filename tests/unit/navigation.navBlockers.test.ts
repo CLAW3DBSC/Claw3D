@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { buildNavGrid } from "@/features/retro-office/core/navigation";
+import { ITEM_METADATA } from "@/features/retro-office/core/geometry";
 import type { FurnitureItem } from "@/features/retro-office/core/types";
 
 // Minimal helper: creates a FurnitureItem at a given position.
@@ -42,6 +43,7 @@ const isBlocked = (
 };
 
 describe("buildNavGrid – solid floor props block pathfinding (issue #4)", () => {
+  // The five types that were previously missing from the blocking set (issue #4).
   const solidProps = [
     "water_cooler",
     "server_terminal",
@@ -64,6 +66,55 @@ describe("buildNavGrid – solid floor props block pathfinding (issue #4)", () =
     const item = makeItem("keyboard", 400, 300);
     const grid = buildNavGrid([item]);
     // Centre cell of the item should remain free (border cells are always blocked, pick interior).
+    expect(isBlocked(grid, 400, 300)).toBe(false);
+  });
+});
+
+describe("buildNavGrid – metadata-driven blocking (issue #4 rework)", () => {
+  it("respects ITEM_METADATA.blocksNavigation for known blocking types", () => {
+    // Spot-check a few well-known blocking types derived from metadata.
+    const blockingTypes = Object.entries(ITEM_METADATA)
+      .filter(([, meta]) => meta.blocksNavigation)
+      .map(([type]) => type);
+
+    for (const type of blockingTypes) {
+      const item = makeItem(type, 400, 300);
+      const grid = buildNavGrid([item]);
+      expect(isBlocked(grid, 400, 300), `expected '${type}' to block`).toBe(true);
+    }
+  });
+
+  it("does not block for known non-blocking types from ITEM_METADATA", () => {
+    const nonBlockingTypes = Object.entries(ITEM_METADATA)
+      .filter(([, meta]) => !meta.blocksNavigation)
+      .map(([type]) => type);
+
+    for (const type of nonBlockingTypes) {
+      const item = makeItem(type, 400, 300);
+      const grid = buildNavGrid([item]);
+      expect(isBlocked(grid, 400, 300), `expected '${type}' NOT to block`).toBe(false);
+    }
+  });
+
+  it("a new item type with blocksNavigation: true is correctly blocked by buildNavGrid", () => {
+    // Simulate adding a brand-new prop type to ITEM_METADATA at runtime.
+    // This verifies the metadata-driven path works end-to-end for future additions.
+    const testType = "__test_new_blocking_prop__";
+    ITEM_METADATA[testType] = { blocksNavigation: true };
+    try {
+      const item = makeItem(testType, 400, 300);
+      const grid = buildNavGrid([item]);
+      expect(isBlocked(grid, 400, 300)).toBe(true);
+    } finally {
+      // Clean up the temporary entry so it doesn't affect other tests.
+      delete ITEM_METADATA[testType];
+    }
+  });
+
+  it("an unknown item type defaults to non-blocking (safe fallback)", () => {
+    // Types not listed in ITEM_METADATA should never accidentally block navigation.
+    const item = makeItem("__completely_unknown_type__", 400, 300);
+    const grid = buildNavGrid([item]);
     expect(isBlocked(grid, 400, 300)).toBe(false);
   });
 });

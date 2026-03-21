@@ -5,6 +5,7 @@ import {
 import {
   getItemBounds,
   ITEM_FOOTPRINT,
+  ITEM_METADATA,
   snap,
 } from "@/features/retro-office/core/geometry";
 import type {
@@ -75,55 +76,20 @@ const GRID_ROWS = Math.ceil(CANVAS_H / GRID_CELL);
 
 export type NavGrid = Uint8Array;
 
-// These types define the coarse collision world for pathfinding. Keep this list conservative:
-// add types here when they materially block walking, and use dedicated route helpers when a
-// room needs staged entry behavior instead of a single destination point.
-const BLOCKING_TYPES = new Set([
-  "wall",
-  "round_table",
-  "couch",
-  "couch_v",
-  "executive_desk",
-  "bookshelf",
-  "pingpong",
-  "table_rect",
-  "cabinet",
-  "fridge",
-  "plant",
-  "whiteboard",
-  "vending",
-  "atm",
-  "sms_booth",
-  "phone_booth",
-  "server_rack",
-  "sink",
-  "printer",
-  "stove",
-  "microwave",
-  "qa_terminal",
-  "device_rack",
-  "test_bench",
-  "treadmill",
-  "weight_bench",
-  "dumbbell_rack",
-  "exercise_bike",
-  "punching_bag",
-  "rowing_machine",
-  "kettlebell_rack",
-  "yoga_mat",
-  // Previously missing solid floor props (issue #4):
-  "water_cooler",    // freestanding floor appliance; agents were pathfinding through it
-  "server_terminal", // floor-standing terminal in the server room
-  "dishwasher",      // floor appliance in the kitchen
-  "easel",           // floor-standing art-room prop
-  "beanbag",         // floor seat; large enough to obstruct walking paths
-]);
+/**
+ * Returns true if the given item type should block pathfinding cells.
+ * Driven by ITEM_METADATA.blocksNavigation — the single source of truth for
+ * nav-blocking behaviour. Unknown types default to false (non-blocking) so
+ * newly added decorative items never accidentally block navigation.
+ */
+const itemBlocksNavigation = (type: string): boolean =>
+  ITEM_METADATA[type]?.blocksNavigation ?? false;
 
 export function buildNavGrid(furniture: FurnitureItem[]): NavGrid {
   const grid = new Uint8Array(GRID_COLS * GRID_ROWS);
   const pad = GRID_CELL * 0.6;
   for (const item of furniture) {
-    if (!BLOCKING_TYPES.has(item.type)) continue;
+    if (!itemBlocksNavigation(item.type)) continue;
     const bounds = getItemBounds(item);
     const x1 = bounds.x - pad;
     const y1 = bounds.y - pad;

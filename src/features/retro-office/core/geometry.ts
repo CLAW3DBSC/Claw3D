@@ -97,6 +97,80 @@ export const getItemBaseSize = (item: FurnitureItem) => {
   };
 };
 
+/**
+ * Per-type metadata for furniture items.
+ *
+ * blocksNavigation: true  → solid floor-standing prop; marks grid cells as impassable.
+ * blocksNavigation: false → desk decoration, wall-mounted, elevated, or passable item.
+ *
+ * This is the single source of truth for nav-blocking behaviour. `buildNavGrid` in
+ * navigation.ts reads this instead of maintaining its own hardcoded type set.
+ */
+export const ITEM_METADATA: Record<string, { blocksNavigation: boolean }> = {
+  // ── structural ────────────────────────────────────────────────────────────
+  wall:            { blocksNavigation: true  },
+  door:            { blocksNavigation: false }, // passable
+  // ── seating / lounge ──────────────────────────────────────────────────────
+  chair:           { blocksNavigation: false }, // passable / agents sit on them
+  couch:           { blocksNavigation: true  },
+  couch_v:         { blocksNavigation: true  },
+  beanbag:         { blocksNavigation: true  }, // large floor seat (issue #4)
+  // ── desks / workstations ──────────────────────────────────────────────────
+  desk_cubicle:    { blocksNavigation: false }, // agents stand at these; collision handled separately
+  executive_desk:  { blocksNavigation: true  },
+  // ── tables ────────────────────────────────────────────────────────────────
+  round_table:     { blocksNavigation: true  },
+  table_rect:      { blocksNavigation: true  },
+  pingpong:        { blocksNavigation: true  },
+  // ── storage / shelving ────────────────────────────────────────────────────
+  bookshelf:       { blocksNavigation: true  },
+  cabinet:         { blocksNavigation: true  },
+  wall_cabinet:    { blocksNavigation: false }, // wall-mounted; agents walk under
+  // ── kitchen appliances ────────────────────────────────────────────────────
+  fridge:          { blocksNavigation: true  },
+  stove:           { blocksNavigation: true  },
+  microwave:       { blocksNavigation: false }, // counter-top / elevated
+  dishwasher:      { blocksNavigation: true  }, // floor appliance (issue #4)
+  sink:            { blocksNavigation: true  },
+  coffee_machine:  { blocksNavigation: false }, // elevated on counter
+  // ── office equipment ──────────────────────────────────────────────────────
+  printer:         { blocksNavigation: true  },
+  vending:         { blocksNavigation: true  },
+  atm:             { blocksNavigation: true  },
+  whiteboard:      { blocksNavigation: true  },
+  computer:        { blocksNavigation: false }, // desk item
+  keyboard:        { blocksNavigation: false }, // desk decoration
+  mouse:           { blocksNavigation: false }, // desk decoration
+  // ── server room ───────────────────────────────────────────────────────────
+  server_rack:     { blocksNavigation: true  },
+  server_terminal: { blocksNavigation: true  }, // floor-standing terminal (issue #4)
+  sms_booth:       { blocksNavigation: true  },
+  phone_booth:     { blocksNavigation: true  },
+  // ── QA lab ────────────────────────────────────────────────────────────────
+  qa_terminal:     { blocksNavigation: true  },
+  device_rack:     { blocksNavigation: true  },
+  test_bench:      { blocksNavigation: true  },
+  // ── gym ───────────────────────────────────────────────────────────────────
+  treadmill:       { blocksNavigation: true  },
+  weight_bench:    { blocksNavigation: true  },
+  dumbbell_rack:   { blocksNavigation: true  },
+  exercise_bike:   { blocksNavigation: true  },
+  punching_bag:    { blocksNavigation: true  },
+  rowing_machine:  { blocksNavigation: true  },
+  kettlebell_rack: { blocksNavigation: true  },
+  yoga_mat:        { blocksNavigation: true  },
+  // ── art room ──────────────────────────────────────────────────────────────
+  easel:           { blocksNavigation: true  }, // floor-standing prop (issue #4)
+  // ── water cooler ──────────────────────────────────────────────────────────
+  water_cooler:    { blocksNavigation: true  }, // freestanding floor appliance (issue #4)
+  // ── decorative / small ────────────────────────────────────────────────────
+  plant:           { blocksNavigation: true  },
+  lamp:            { blocksNavigation: false }, // floor lamp but thin; passable in practice
+  trash:           { blocksNavigation: false }, // small bin
+  clock:           { blocksNavigation: false }, // wall-mounted
+  mug:             { blocksNavigation: false }, // desk item
+};
+
 export const FURNITURE_ROTATION: Record<string, number> = {
   couch: Math.PI,
   couch_v: Math.PI / 2,
