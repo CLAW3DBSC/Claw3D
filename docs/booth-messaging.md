@@ -75,6 +75,19 @@ TELEGRAM_CHAT_ID=123456789
 2. Start a conversation with your bot
 3. Fetch `https://api.telegram.org/bot<TOKEN>/getUpdates` → find your `chat_id`
 
+**iMessage via BlueBubbles** (messages only — no calls, requires a Mac):
+
+```bash
+MESSAGING_PROVIDER=imessage
+
+IMESSAGE_BLUEBUBBLES_URL=http://192.168.1.50:1234   # your Mac's BlueBubbles server
+IMESSAGE_BLUEBUBBLES_PASSWORD=your-password
+```
+
+1. Install [BlueBubbles](https://bluebubbles.app) on a Mac that stays on and is signed into iMessage
+2. In BlueBubbles settings, note the server URL and set a password
+3. Make sure the Mac is reachable from your Claw3D server (same network, or via ngrok / Cloudflare Tunnel)
+
 ### 2 — (Optional) Owner notification route
 
 If you want agents to be able to notify you directly without knowing your
@@ -143,22 +156,25 @@ The active provider is read from the `MESSAGING_PROVIDER` environment variable.
 Individual API requests may pass a `provider` field to override it.
 
 ```
-MESSAGING_PROVIDER=twilio     → Twilio REST API (default)
-MESSAGING_PROVIDER=whatsapp   → WhatsApp (not yet implemented)
-MESSAGING_PROVIDER=telegram   → Telegram (not yet implemented)
+MESSAGING_PROVIDER=twilio     → Twilio REST API (SMS + voice calls)
+MESSAGING_PROVIDER=whatsapp   → WhatsApp via Twilio (messages only)
+MESSAGING_PROVIDER=telegram   → Telegram Bot API (messages only)
+MESSAGING_PROVIDER=imessage   → iMessage via BlueBubbles (messages only)
 ```
 
 ### Provider support matrix
 
 | Provider | Message | Call | Status | Notes |
 |---|---|---|---|---|
-| `twilio` | ✅ | ✅ | Implemented | Twilio REST API — SMS + voice |
-| `whatsapp` | ✅ | ❌ | Implemented | Twilio WhatsApp API |
-| `telegram` | ✅ | ❌ | Implemented | Telegram Bot API |
-| `imessage` | ❌ | ❌ | Not supported | No public Apple API |
+| `twilio` | ✅ | ✅ | Implemented | Twilio REST API — SMS + voice calls |
+| `whatsapp` | ✅ | ❌ | Implemented | Twilio WhatsApp API — messages only |
+| `telegram` | ✅ | ❌ | Implemented | Telegram Bot API — messages only |
+| `imessage` | ✅ | ❌ | Implemented | BlueBubbles server (Mac) — messages only |
 
-Calls are only available via Twilio — WhatsApp and Telegram do not expose
-programmatic outbound call APIs.
+> **Calls are only available via Twilio.**
+> WhatsApp, Telegram, and iMessage do not expose public APIs for initiating
+> outbound calls. This is a platform limitation, not a Claw3D limitation.
+> If you need voice calls, use `MESSAGING_PROVIDER=twilio`.
 
 ### Adding a new provider
 
@@ -193,8 +209,9 @@ relevant API links and env var shapes as a starting point.
 |---|---|
 | `src/lib/office/twilio.ts` | Twilio REST client. `sendSms()`, `makeCall()`, `normalizePhoneNumber()`. Reads all credentials from env vars. |
 | `src/lib/office/messagingProviders.ts` | Provider abstraction. `dispatchSendSms()`, `dispatchMakeCall()`, provider status helpers. |
-| `src/lib/office/providers/whatsapp.ts` | WhatsApp provider via Twilio WhatsApp API. Requires `TWILIO_WHATSAPP_NUMBER`. |
-| `src/lib/office/providers/telegram.ts` | Telegram provider via Bot API. Requires `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID`. |
+| `src/lib/office/providers/whatsapp.ts` | WhatsApp provider via Twilio WhatsApp API. Messages only. Requires `TWILIO_WHATSAPP_NUMBER`. |
+| `src/lib/office/providers/telegram.ts` | Telegram provider via Bot API. Messages only. Requires `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID`. |
+| `src/lib/office/providers/imessage.ts` | iMessage provider via BlueBubbles REST API. Messages only. Requires a Mac running BlueBubbles. |
 | `src/lib/office/boothContacts.ts` | localStorage contacts (`claw3d-booth-contacts`) and history (`claw3d-booth-history`, capped at 50). |
 | `src/features/office/dialogs/BoothInputDialog.tsx` | Full-screen booth input UI shared by Phone and SMS booths. |
 | `skills/notify-owner/SKILL.md` | OpenClaw skill — teaches agents to send owner notifications. |
@@ -280,26 +297,31 @@ If the key is not set, the booth animation plays silently.
 ## Full environment variable reference
 
 ```bash
-# ── Messaging provider ────────────────────────────────────────────────────────
-MESSAGING_PROVIDER=twilio          # twilio (default) | whatsapp | telegram
+# ── Active provider ───────────────────────────────────────────────────────────
+# Choose one: twilio (default) | whatsapp | telegram | imessage
+MESSAGING_PROVIDER=twilio
 
-# ── Twilio (SMS + calls) ──────────────────────────────────────────────────────
+# ── Twilio — SMS + voice calls ────────────────────────────────────────────────
 TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 TWILIO_AUTH_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 TWILIO_PHONE_NUMBER=+15005550006
 
-# ── WhatsApp via Twilio (messages only) ───────────────────────────────────────
-# Uses same TWILIO_ACCOUNT_SID + TWILIO_AUTH_TOKEN
+# ── WhatsApp via Twilio — messages only (no calls) ────────────────────────────
+# Uses the same TWILIO_ACCOUNT_SID + TWILIO_AUTH_TOKEN
 TWILIO_WHATSAPP_NUMBER=whatsapp:+14155238886
 
-# ── Telegram (messages only) ──────────────────────────────────────────────────
+# ── Telegram Bot API — messages only (no calls) ───────────────────────────────
 TELEGRAM_BOT_TOKEN=123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ
 TELEGRAM_CHAT_ID=123456789
 
-# ── Optional ──────────────────────────────────────────────────────────────────
-OWNER_PHONE_NUMBER=+1555...        # for /api/agent/notify — never exposed
+# ── iMessage via BlueBubbles — messages only (no calls, requires Mac) ─────────
+IMESSAGE_BLUEBUBBLES_URL=http://192.168.1.50:1234
+IMESSAGE_BLUEBUBBLES_PASSWORD=your-bluebubbles-password
 
-# ElevenLabs TTS (phone booth browser audio)
+# ── Optional ──────────────────────────────────────────────────────────────────
+OWNER_PHONE_NUMBER=+1555...        # for /api/agent/notify — never exposed to agents
+
+# ElevenLabs TTS — phone booth browser audio (Twilio provider only)
 ELEVENLABS_API_KEY=sk_...
 ELEVENLABS_VOICE_ID=...
 ELEVENLABS_MODEL_ID=eleven_flash_v2_5
