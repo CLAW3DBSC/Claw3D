@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   astar2D,
   buildNavGrid2D,
-  type NavGrid2D,
 } from "@/lib/office/pathfinding";
 import type { OfficeMap } from "@/lib/office/schema";
 import { createEmptyOfficeMap, createStarterOfficeMap } from "@/lib/office/schema";
