@@ -33,6 +33,7 @@ import {
   type OfficeTextPhase,
   resolveOfficeIntentSnapshot,
   resolveOfficeCallDirective,
+  resolveOfficeCatDirective,
   resolveOfficeDeskDirective,
   resolveOfficeGithubDirective,
   resolveOfficeGymDirective,
@@ -40,11 +41,13 @@ import {
   resolveOfficeStandupDirective,
   resolveOfficeTextDirective,
 } from "@/lib/office/deskDirectives";
+import { randomGarfieldPetHoldMs } from "@/lib/office/garfield";
 import {
   extractText,
   extractThinking,
 } from "@/lib/text/message-extract";
 import { randomUUID } from "@/lib/uuid";
+import { RESERVED_MAIN_AGENT_ID } from "@/lib/agents/constants";
 
 // Office animation is derived in two passes:
 // 1. Event reduction records short-lived latches from fresh gateway traffic.
@@ -90,12 +93,14 @@ export type OfficeStandupTriggerRequest = {
 };
 
 export type OfficeAnimationTriggerState = {
+  catUntilByAgentId: NumberByAgentId;
   cleaningCues: OfficeCleaningCue[];
   deskDirectiveKeyByAgentId: StringByAgentId;
   deskHoldByAgentId: BooleanByAgentId;
   githubDirectiveKeyByAgentId: StringByAgentId;
   githubHoldByAgentId: BooleanByAgentId;
   gymCooldownUntilByAgentId: NumberByAgentId;
+  lastManualCatCommandKeyByAgentId: StringByAgentId;
   lastManualGymCommandKeyByAgentId: StringByAgentId;
   manualGymUntilByAgentId: NumberByAgentId;
   pendingStandupRequest: OfficeStandupTriggerRequest | null;
@@ -119,6 +124,7 @@ export type OfficeAnimationTriggerState = {
 
 export type OfficeAnimationState = {
   awaitingApprovalByAgentId: BooleanByAgentId;
+  catHoldByAgentId: BooleanByAgentId;
   cleaningCues: OfficeCleaningCue[];
   deskHoldByAgentId: BooleanByAgentId;
   githubHoldByAgentId: BooleanByAgentId;
@@ -578,6 +584,11 @@ const pruneOfficeAnimationTriggerState = (
   const activeAgentIds = new Set(agents.map((agent) => agent.agentId));
   return {
     ...state,
+    catUntilByAgentId: pruneFutureMap(
+      state.catUntilByAgentId,
+      activeAgentIds,
+      nowMs,
+    ),
     deskDirectiveKeyByAgentId: pruneStringMap(
       state.deskDirectiveKeyByAgentId,
       activeAgentIds,
@@ -592,6 +603,10 @@ const pruneOfficeAnimationTriggerState = (
       state.gymCooldownUntilByAgentId,
       activeAgentIds,
       nowMs,
+    ),
+    lastManualCatCommandKeyByAgentId: pruneStringMap(
+      state.lastManualCatCommandKeyByAgentId,
+      activeAgentIds,
     ),
     lastManualGymCommandKeyByAgentId: pruneStringMap(
       state.lastManualGymCommandKeyByAgentId,
@@ -755,6 +770,20 @@ const applyUserMessageTriggers = (params: {
           : { ...next.qaHoldByAgentId, [params.agentId]: true },
     };
   }
+  if (intentSnapshot.cat) {
+    const catCommandKey = normalizeCommandText(params.message);
+    next = {
+      ...next,
+      lastManualCatCommandKeyByAgentId: {
+        ...next.lastManualCatCommandKeyByAgentId,
+        [params.agentId]: catCommandKey,
+      },
+      catUntilByAgentId: {
+        ...next.catUntilByAgentId,
+        [params.agentId]: params.nowMs + randomGarfieldPetHoldMs(),
+      },
+    };
+  }
   if (intentSnapshot.gym?.source === "manual") {
     const gymCommandKey = normalizeCommandText(params.message);
     next = {
@@ -770,7 +799,7 @@ const applyUserMessageTriggers = (params: {
     };
   }
   if (
-    params.agentId === "main" &&
+    params.agentId === RESERVED_MAIN_AGENT_ID &&
     intentSnapshot.standup === "standup"
   ) {
     const requestKey = normalizeCommandText(params.message);
@@ -863,12 +892,14 @@ const applyUserMessageTriggers = (params: {
 };
 
 export const createOfficeAnimationTriggerState = (): OfficeAnimationTriggerState => ({
+  catUntilByAgentId: emptyObject(),
   cleaningCues: [],
   deskDirectiveKeyByAgentId: emptyObject(),
   deskHoldByAgentId: emptyObject(),
   githubDirectiveKeyByAgentId: emptyObject(),
   githubHoldByAgentId: emptyObject(),
   gymCooldownUntilByAgentId: emptyObject(),
+  lastManualCatCommandKeyByAgentId: emptyObject(),
   lastManualGymCommandKeyByAgentId: emptyObject(),
   manualGymUntilByAgentId: emptyObject(),
   pendingStandupRequest: null,
@@ -1046,7 +1077,12 @@ export const reconcileOfficeAnimationTriggerState = (params: {
     next.lastManualGymCommandKeyByAgentId,
     activeAgentIds,
   );
+  const currentCatCommandKeys = pruneStringMap(
+    next.lastManualCatCommandKeyByAgentId,
+    activeAgentIds,
+  );
 
+  const catUntilByAgentId: NumberByAgentId = {};
   const deskHoldByAgentId: BooleanByAgentId = {};
   const deskDirectiveKeyByAgentId: StringByAgentId = {};
   const githubHoldByAgentId: BooleanByAgentId = {};
@@ -1126,6 +1162,27 @@ export const reconcileOfficeAnimationTriggerState = (params: {
       qaHoldByAgentId[agentId] = true;
     }
 
+    const catDirective = resolveLatestDirective({
+      lastUserMessage: agent.lastUserMessage,
+      transcriptEntries: agent.transcriptEntries,
+      resolver: resolveOfficeCatDirective,
+    });
+    if (catDirective?.directive === "cat_lounge") {
+      const previousCommandKey = currentCatCommandKeys[agentId] ?? "";
+      const currentUntil = next.catUntilByAgentId[agentId] ?? 0;
+      if (catDirective.key !== previousCommandKey) {
+        catUntilByAgentId[agentId] = nowMs + randomGarfieldPetHoldMs();
+        currentCatCommandKeys[agentId] = catDirective.key;
+      } else if (currentUntil > nowMs) {
+        catUntilByAgentId[agentId] = currentUntil;
+      }
+    } else {
+      const currentUntil = next.catUntilByAgentId[agentId] ?? 0;
+      if (currentUntil > nowMs) {
+        catUntilByAgentId[agentId] = currentUntil;
+      }
+    }
+
     const skillGymDirective = resolveLatestDirective({
       lastUserMessage: agent.lastUserMessage,
       transcriptEntries: agent.transcriptEntries,
@@ -1146,7 +1203,7 @@ export const reconcileOfficeAnimationTriggerState = (params: {
       resolver: resolveOfficeStandupDirective,
     });
     if (
-      agentId === "main" &&
+      agentId === RESERVED_MAIN_AGENT_ID &&
       standupDirective &&
       pendingStandupRequest?.key !== standupDirective.key
     ) {
@@ -1206,10 +1263,12 @@ export const reconcileOfficeAnimationTriggerState = (params: {
   return {
     ...next,
     cleaningCues: cleaningCues.slice(0, CLEANING_CUE_LIMIT),
+    catUntilByAgentId,
     deskDirectiveKeyByAgentId,
     deskHoldByAgentId,
     githubDirectiveKeyByAgentId,
     githubHoldByAgentId,
+    lastManualCatCommandKeyByAgentId: currentCatCommandKeys,
     lastManualGymCommandKeyByAgentId: currentImmediateGymKeys,
     manualGymUntilByAgentId,
     pendingStandupRequest,
@@ -1303,6 +1362,7 @@ export const buildOfficeAnimationState = (params: {
   const nowMs = params.nowMs ?? Date.now();
   const marketplaceGymHoldByAgentId = params.marketplaceGymHoldByAgentId ?? {};
   const awaitingApprovalByAgentId: BooleanByAgentId = {};
+  const catHoldByAgentId: BooleanByAgentId = {};
   const deskHoldByAgentId: BooleanByAgentId = {};
   const gymHoldByAgentId: BooleanByAgentId = {};
   const phoneBoothHoldByAgentId: BooleanByAgentId = {};
@@ -1331,6 +1391,9 @@ export const buildOfficeAnimationState = (params: {
     if ((params.state.thinkingUntilByAgentId[agentId] ?? 0) > nowMs) {
       thinkingByAgentId[agentId] = true;
     }
+    if ((params.state.catUntilByAgentId[agentId] ?? 0) > nowMs) {
+      catHoldByAgentId[agentId] = true;
+    }
     const phoneCallRequest = params.state.phoneCallByAgentId[agentId];
     if (phoneCallRequest) {
       phoneCallByAgentId[agentId] = phoneCallRequest;
@@ -1352,6 +1415,7 @@ export const buildOfficeAnimationState = (params: {
 
   return {
     awaitingApprovalByAgentId,
+    catHoldByAgentId,
     cleaningCues: params.state.cleaningCues,
     deskHoldByAgentId,
     githubHoldByAgentId: params.state.githubHoldByAgentId,

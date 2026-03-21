@@ -11,11 +11,25 @@ import { toWorld } from "@/features/retro-office/core/geometry";
 import type { JanitorActor, RenderAgent } from "@/features/retro-office/core/types";
 import { AgentModelProps } from "@/features/retro-office/objects/types";
 
+const MAX_SPEECH_BUBBLE_CHARS = 140;
+const MAX_SPEECH_BUBBLE_LINES = 5;
+const MAX_SPEECH_BUBBLE_HEIGHT = 1.56;
+
+const truncateSpeechBubbleText = (value: string): string => {
+  const compact = value.replace(/\s+/g, " ").trim();
+  if (compact.length <= MAX_SPEECH_BUBBLE_CHARS) return compact;
+  return `${compact.slice(0, MAX_SPEECH_BUBBLE_CHARS - 1).trimEnd()}…`;
+};
+
 export const AgentModel = memo(function AgentModel({
   agentId,
   name,
   status,
   color,
+  avatarKind = "human",
+  animalSpecies = "cat",
+  animalAppearance,
+  catAppearance,
   appearance,
   agentsRef,
   agentLookupRef,
@@ -54,11 +68,22 @@ export const AgentModel = memo(function AgentModel({
   const speechBubbleMatRef = useRef<THREE.MeshBasicMaterial>(null);
   const awayBubbleRef = useRef<THREE.Group>(null);
   const bodyMatRef = useRef<THREE.MeshLambertMaterial>(null);
+  const catHeadRef = useRef<THREE.Group>(null);
+  const catTailRef = useRef<THREE.Group>(null);
   const pos = useRef(new THREE.Vector3(0, 0, 0));
   const resolvedAppearance = useMemo(
     () => appearance ?? createDefaultAgentAvatarProfile(agentId),
     [agentId, appearance]
   );
+  const isAnimalAvatar = avatarKind === "cat" || avatarKind === "animal";
+  const resolvedAnimalAppearance = animalAppearance ?? catAppearance;
+
+  const catBaseCoatColor = resolvedAnimalAppearance?.baseCoatColor ?? "#d0831f";
+  const catAccentCoatColor = resolvedAnimalAppearance?.accentCoatColor ?? "#f6c87b";
+  const catEyeColor = resolvedAnimalAppearance?.eyeColor ?? "#1f1720";
+  const catPattern = resolvedAnimalAppearance?.pattern ?? "solid";
+  const catFurLength = resolvedAnimalAppearance?.furLength ?? "short";
+  const catFurScale = catFurLength === "long" ? 1.08 : 1;
 
   useFrame(() => {
     const agent =
@@ -67,7 +92,11 @@ export const AgentModel = memo(function AgentModel({
     if (!agent || !groupRef.current) return;
 
     const [wx, , wz] = toWorld(agent.x, agent.y);
-    pos.current.set(wx, 0, wz);
+    const baseElevation =
+      isAnimalAvatar && typeof agent.elevationOffset === "number"
+        ? agent.elevationOffset
+        : 0;
+    pos.current.set(wx, baseElevation, wz);
     groupRef.current.position.lerp(pos.current, 0.15);
 
     const targetY = agent.facing;
@@ -86,39 +115,84 @@ export const AgentModel = memo(function AgentModel({
     const workoutPhase = Math.sin(agent.frame * 0.18 + (agent.phaseOffset ?? 0));
     const workoutPushPhase = Math.sin(agent.frame * 0.18 + (agent.phaseOffset ?? 0) + Math.PI / 2);
     groupRef.current.rotation.z = 0;
-    groupRef.current.rotation.x =
-      agent.state === "sitting"
-        ? -0.15
-        : isWorkout
-          ? workoutStyle === "bike"
-            ? 0.18
-            : workoutStyle === "row"
-              ? -0.12 + Math.max(0, workoutPhase) * 0.08
-              : workoutStyle === "stretch"
-                ? -0.08
-                : workoutStyle === "run"
-                  ? 0.08
-                  : workoutStyle === "box"
-                    ? 0.04
-                    : 0.02
-          : agent.pingPongUntil
-            ? 0.08
-            : 0;
-    const bounce =
-      agent.state === "walking"
-        ? Math.sin(frameValue * WALK_ANIM_SPEED) * 0.04
-        : isWorkout
-          ? workoutStyle === "stretch"
-            ? 0.012 + Math.abs(workoutPhase) * 0.018
-            : workoutStyle === "row"
-              ? 0.015 + Math.abs(workoutPhase) * 0.028
-              : 0.02 + Math.abs(workoutPhase) * 0.04
+    if (isAnimalAvatar) {
+      const species = animalSpecies ?? "cat";
+      const isWalking = agent.state === "walking";
+      const duckMode = species === "duck";
+      const monkeyMode = species === "monkey";
+      const snakeMode = species === "snake";
+      groupRef.current.rotation.x = isWalking ? (snakeMode ? 0.01 : 0.04) : 0;
+      const bounce =
+        isWalking
+          ? snakeMode
+            ? Math.sin(frameValue * WALK_ANIM_SPEED * 1.1) * 0.006
+            : duckMode
+              ? Math.sin(frameValue * WALK_ANIM_SPEED * 1.25) * 0.012
+              : monkeyMode
+                ? Math.sin(frameValue * WALK_ANIM_SPEED * 1.6) * 0.03
+                : Math.sin(frameValue * WALK_ANIM_SPEED * 1.35) * 0.025
           : 0;
-    const breathe =
-      agent.state === "standing" || isWorkout || agent.pingPongUntil
-        ? Math.sin(frameValue * 0.03) * 0.01
-        : 0;
-    groupRef.current.position.y = bounce + breathe;
+      const breathe = Math.sin(frameValue * 0.05) * 0.006;
+      groupRef.current.position.y = baseElevation + bounce + breathe;
+      if (duckMode) {
+        groupRef.current.rotation.z =
+          isWalking ? Math.sin(frameValue * WALK_ANIM_SPEED * 1.6) * 0.08 : 0;
+      } else if (monkeyMode) {
+        groupRef.current.rotation.z =
+          isWalking ? Math.sin(frameValue * WALK_ANIM_SPEED * 1.8) * 0.06 : 0;
+      } else if (snakeMode) {
+        groupRef.current.rotation.z =
+          isWalking ? Math.sin(frameValue * WALK_ANIM_SPEED * 2.2) * 0.12 : 0;
+      }
+      if (catHeadRef.current) {
+        catHeadRef.current.rotation.z = snakeMode
+          ? Math.sin(agent.frame * 0.08) * 0.12
+          : Math.sin(agent.frame * 0.05) * 0.05;
+      }
+      if (catTailRef.current) {
+        catTailRef.current.rotation.x = snakeMode ? -0.04 : -0.28;
+        catTailRef.current.rotation.y = snakeMode
+          ? Math.sin(agent.frame * 0.15) * 0.75
+          : Math.sin(agent.frame * 0.08) * 0.45;
+        catTailRef.current.rotation.z = snakeMode
+          ? Math.sin(agent.frame * 0.2) * 0.14
+          : Math.sin(agent.frame * 0.09) * 0.08;
+      }
+    } else {
+      groupRef.current.rotation.x =
+        agent.state === "sitting"
+          ? -0.15
+          : isWorkout
+            ? workoutStyle === "bike"
+              ? 0.18
+              : workoutStyle === "row"
+                ? -0.12 + Math.max(0, workoutPhase) * 0.08
+                : workoutStyle === "stretch"
+                  ? -0.08
+                  : workoutStyle === "run"
+                    ? 0.08
+                    : workoutStyle === "box"
+                      ? 0.04
+                      : 0.02
+            : agent.pingPongUntil
+              ? 0.08
+              : 0;
+      const bounce =
+        agent.state === "walking"
+          ? Math.sin(frameValue * WALK_ANIM_SPEED) * 0.04
+          : isWorkout
+            ? workoutStyle === "stretch"
+              ? 0.012 + Math.abs(workoutPhase) * 0.018
+              : workoutStyle === "row"
+                ? 0.015 + Math.abs(workoutPhase) * 0.028
+                : 0.02 + Math.abs(workoutPhase) * 0.04
+            : 0;
+      const breathe =
+        agent.state === "standing" || isWorkout || agent.pingPongUntil
+          ? Math.sin(frameValue * 0.03) * 0.01
+          : 0;
+      groupRef.current.position.y = bounce + breathe;
+    }
 
     if (leftArmRef.current) {
       leftArmRef.current.rotation.x = 0;
@@ -520,15 +594,15 @@ export const AgentModel = memo(function AgentModel({
         : "...";
   const activeSpeechBubble = showSpeech && Boolean(speechText?.trim());
   const normalizedSpeechBubbleText = activeSpeechBubble
-    ? resolvedSpeechText.replace(/\s+/g, " ").trim()
+    ? truncateSpeechBubbleText(resolvedSpeechText)
     : resolvedSpeechText;
   const speechBubbleDisplayText = normalizedSpeechBubbleText;
   const speechBubbleTextLength = speechBubbleDisplayText.length;
   const speechBubbleWidth = activeSpeechBubble
-    ? Math.min(4.6, Math.max(1.8, 1.55 + speechBubbleTextLength * 0.018))
+    ? Math.min(3.2, Math.max(1.6, 1.38 + speechBubbleTextLength * 0.013))
     : 0.36;
-  const speechBubblePaddingX = activeSpeechBubble ? 0.34 : 0.06;
-  const speechBubblePaddingY = activeSpeechBubble ? 0.3 : 0.06;
+  const speechBubblePaddingX = activeSpeechBubble ? 0.28 : 0.06;
+  const speechBubblePaddingY = activeSpeechBubble ? 0.24 : 0.06;
   const speechBubbleMaxWidth = Math.max(
     0.24,
     speechBubbleWidth - speechBubblePaddingX,
@@ -539,18 +613,24 @@ export const AgentModel = memo(function AgentModel({
   const estimatedSpeechLines = activeSpeechBubble
     ? Math.max(
         1,
-        Math.ceil(speechBubbleTextLength / estimatedSpeechCharsPerLine),
+        Math.min(
+          MAX_SPEECH_BUBBLE_LINES,
+          Math.ceil(speechBubbleTextLength / estimatedSpeechCharsPerLine),
+        ),
       )
     : 1;
   const speechBubbleHeight = activeSpeechBubble
-    ? Math.max(0.72, estimatedSpeechLines * 0.26 + speechBubblePaddingY)
+    ? Math.min(
+        MAX_SPEECH_BUBBLE_HEIGHT,
+        Math.max(0.58, estimatedSpeechLines * 0.2 + speechBubblePaddingY),
+      )
     : 0.2;
   const speechBubbleFontSize = activeSpeechBubble
-    ? speechBubbleTextLength > 110
-      ? 0.188
+    ? speechBubbleTextLength > 100
+      ? 0.152
       : speechBubbleTextLength > 70
-        ? 0.2
-        : 0.216
+        ? 0.164
+        : 0.176
     : 0.13;
   const speechBubbleTextColor = activeSpeechBubble
     ? "#f8fafc"
@@ -567,6 +647,19 @@ export const AgentModel = memo(function AgentModel({
         : "#8dc4ff"
     : "transparent";
   const speechBubbleBorderInset = activeSpeechBubble ? 0.03 : 0;
+  const displayName = name.trim();
+  const nameLength = displayName.length;
+  const nameplateWidth = Math.max(1.06, 0.64 + nameLength * 0.067);
+  const nameplateStripeWidth = 0.028;
+  const nameplateStatusDotRadius = 0.052;
+  const nameplateTextLeft = -nameplateWidth / 2 + nameplateStripeWidth + 0.12;
+  const nameplateTextRight =
+    nameplateWidth / 2 - (nameplateStatusDotRadius * 2 + 0.125);
+  const nameplateTextCenterX = (nameplateTextLeft + nameplateTextRight) / 2;
+  const nameplateTextMaxWidth = Math.max(
+    0.3,
+    nameplateTextRight - nameplateTextLeft,
+  );
 
   return (
     <group
@@ -587,10 +680,199 @@ export const AgentModel = memo(function AgentModel({
         onContextMenu?.(agentId, nativeEvent.clientX, nativeEvent.clientY);
       }}
     >
-      <mesh position={[0, 0.001, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+      <mesh
+        position={[0, isAnimalAvatar ? 0.012 : 0.001, 0]}
+        rotation={[-Math.PI / 2, 0, 0]}
+        renderOrder={isAnimalAvatar ? 500 : 0}
+      >
         <circleGeometry args={[0.12, 12]} />
-        <meshBasicMaterial color="#000" transparent opacity={0.2} />
+        <meshBasicMaterial
+          color="#000"
+          transparent
+          opacity={0.2}
+          depthWrite={false}
+        />
       </mesh>
+      <group visible={isAnimalAvatar} position={[0, -0.115, 0]}>
+        <group
+          ref={catTailRef}
+          position={[0, 0.22, -0.13]}
+          rotation={[-0.26, 0, 0]}
+          scale={[catFurLength === "long" ? 1.12 : 1, 1, 1]}
+        >
+          <mesh position={[0, 0.08, -0.02]}>
+            <cylinderGeometry args={[0.02, 0.025, 0.18, 12]} />
+            <meshLambertMaterial color={catBaseCoatColor} />
+          </mesh>
+          <mesh position={[0, 0.17, -0.02]}>
+            <sphereGeometry args={[0.024, 10, 10]} />
+            <meshLambertMaterial color={catAccentCoatColor} />
+          </mesh>
+        </group>
+        <mesh position={[0, 0.2, 0]} scale={[catFurScale, catFurScale, catFurScale]}>
+          <boxGeometry args={[0.22, 0.11, 0.28]} />
+          <meshLambertMaterial color={catBaseCoatColor} />
+        </mesh>
+        <mesh position={[0, 0.2, 0.01]} scale={[catFurScale, catFurScale, catFurScale]}>
+          <boxGeometry args={[0.17, 0.08, 0.2]} />
+          <meshLambertMaterial color={catAccentCoatColor} />
+        </mesh>
+        <mesh position={[0, 0.255, 0.13]} scale={[catFurScale, catFurScale, catFurScale]}>
+          <boxGeometry args={[0.14, 0.11, 0.12]} />
+          <meshLambertMaterial color={catBaseCoatColor} />
+        </mesh>
+        <group
+          ref={catHeadRef}
+          position={[0, 0.255, 0.13]}
+          scale={[catFurScale, catFurScale, catFurScale]}
+        >
+          <mesh position={[-0.04, 0.07, 0]}>
+            <coneGeometry args={[0.028, 0.06, 6]} />
+            <meshLambertMaterial color={catBaseCoatColor} />
+          </mesh>
+          <mesh position={[0.04, 0.07, 0]}>
+            <coneGeometry args={[0.028, 0.06, 6]} />
+            <meshLambertMaterial color={catBaseCoatColor} />
+          </mesh>
+          <mesh position={[-0.04, 0.072, 0.008]}>
+            <coneGeometry args={[0.014, 0.03, 6]} />
+            <meshLambertMaterial color="#f4b0a6" />
+          </mesh>
+          <mesh position={[0.04, 0.072, 0.008]}>
+            <coneGeometry args={[0.014, 0.03, 6]} />
+            <meshLambertMaterial color="#f4b0a6" />
+          </mesh>
+        </group>
+        {animalSpecies === "duck" ? (
+          <>
+            <mesh position={[0, 0.252, 0.24]}>
+              <boxGeometry args={[0.07, 0.026, 0.04]} />
+              <meshLambertMaterial color="#f59e0b" />
+            </mesh>
+            <mesh position={[-0.042, 0.138, 0.09]}>
+              <boxGeometry args={[0.024, 0.03, 0.075]} />
+              <meshLambertMaterial color="#f59e0b" />
+            </mesh>
+            <mesh position={[0.042, 0.138, 0.09]}>
+              <boxGeometry args={[0.024, 0.03, 0.075]} />
+              <meshLambertMaterial color="#f59e0b" />
+            </mesh>
+          </>
+        ) : null}
+        {animalSpecies === "snake" ? (
+          <>
+            <mesh position={[0, 0.17, 0]} scale={[1.1, 0.62, 1.35]}>
+              <boxGeometry args={[0.22, 0.11, 0.28]} />
+              <meshLambertMaterial color={catBaseCoatColor} />
+            </mesh>
+            <mesh position={[0, 0.24, 0.19]} scale={[1, 0.9, 0.8]}>
+              <sphereGeometry args={[0.038, 10, 10]} />
+              <meshLambertMaterial color={catAccentCoatColor} />
+            </mesh>
+          </>
+        ) : null}
+        {animalSpecies === "monkey" ? (
+          <>
+            <mesh position={[0, 0.24, 0.12]}>
+              <sphereGeometry args={[0.035, 10, 10]} />
+              <meshLambertMaterial color="#f2d4b7" />
+            </mesh>
+            <mesh position={[-0.06, 0.26, 0.12]}>
+              <sphereGeometry args={[0.018, 8, 8]} />
+              <meshLambertMaterial color={catBaseCoatColor} />
+            </mesh>
+            <mesh position={[0.06, 0.26, 0.12]}>
+              <sphereGeometry args={[0.018, 8, 8]} />
+              <meshLambertMaterial color={catBaseCoatColor} />
+            </mesh>
+          </>
+        ) : null}
+        {catPattern === "patchy" ? (
+          <>
+            <mesh position={[-0.05, 0.23, 0.06]}>
+              <boxGeometry args={[0.06, 0.04, 0.03]} />
+              <meshLambertMaterial color={catAccentCoatColor} />
+            </mesh>
+            <mesh position={[0.06, 0.195, -0.02]}>
+              <boxGeometry args={[0.05, 0.03, 0.05]} />
+              <meshLambertMaterial color={catAccentCoatColor} />
+            </mesh>
+          </>
+        ) : null}
+        {catPattern === "spotted" ? (
+          <>
+            <mesh position={[-0.05, 0.21, 0.03]}>
+              <sphereGeometry args={[0.014, 8, 8]} />
+              <meshLambertMaterial color={catAccentCoatColor} />
+            </mesh>
+            <mesh position={[0.038, 0.22, -0.02]}>
+              <sphereGeometry args={[0.012, 8, 8]} />
+              <meshLambertMaterial color={catAccentCoatColor} />
+            </mesh>
+            <mesh position={[0.006, 0.19, 0.09]}>
+              <sphereGeometry args={[0.012, 8, 8]} />
+              <meshLambertMaterial color={catAccentCoatColor} />
+            </mesh>
+          </>
+        ) : null}
+        {catPattern === "tabby" ? (
+          <>
+            <mesh position={[-0.04, 0.21, 0.06]}>
+              <boxGeometry args={[0.01, 0.06, 0.02]} />
+              <meshLambertMaterial color={catAccentCoatColor} />
+            </mesh>
+            <mesh position={[0, 0.22, 0.06]}>
+              <boxGeometry args={[0.01, 0.06, 0.02]} />
+              <meshLambertMaterial color={catAccentCoatColor} />
+            </mesh>
+            <mesh position={[0.04, 0.21, 0.06]}>
+              <boxGeometry args={[0.01, 0.06, 0.02]} />
+              <meshLambertMaterial color={catAccentCoatColor} />
+            </mesh>
+          </>
+        ) : null}
+        <mesh position={[-0.033, 0.267, 0.193]}>
+          <sphereGeometry args={[0.012, 10, 10]} />
+          <meshBasicMaterial color={catEyeColor} />
+        </mesh>
+        <mesh position={[0.033, 0.267, 0.193]}>
+          <sphereGeometry args={[0.012, 10, 10]} />
+          <meshBasicMaterial color={catEyeColor} />
+        </mesh>
+        <mesh position={[-0.028, 0.272, 0.2]}>
+          <sphereGeometry args={[0.0036, 8, 8]} />
+          <meshBasicMaterial color="#fff" />
+        </mesh>
+        <mesh position={[0.038, 0.272, 0.2]}>
+          <sphereGeometry args={[0.0036, 8, 8]} />
+          <meshBasicMaterial color="#fff" />
+        </mesh>
+        <mesh position={[0, 0.248, 0.198]}>
+          <sphereGeometry args={[0.01, 8, 8]} />
+          <meshBasicMaterial color="#f59ea9" />
+        </mesh>
+        <mesh position={[0, 0.233, 0.2]}>
+          <boxGeometry args={[0.022, 0.01, 0.008]} />
+          <meshBasicMaterial color="#7a3f3f" />
+        </mesh>
+        <mesh position={[-0.075, 0.154, 0.09]}>
+          <boxGeometry args={[0.052, 0.08, 0.052]} />
+          <meshLambertMaterial color={catBaseCoatColor} />
+        </mesh>
+        <mesh position={[0.075, 0.154, 0.09]}>
+          <boxGeometry args={[0.052, 0.08, 0.052]} />
+          <meshLambertMaterial color={catBaseCoatColor} />
+        </mesh>
+        <mesh position={[-0.07, 0.15, -0.1]}>
+          <boxGeometry args={[0.056, 0.08, 0.056]} />
+          <meshLambertMaterial color={catBaseCoatColor} />
+        </mesh>
+        <mesh position={[0.07, 0.15, -0.1]}>
+          <boxGeometry args={[0.056, 0.08, 0.056]} />
+          <meshLambertMaterial color={catBaseCoatColor} />
+        </mesh>
+      </group>
+      <group visible={!isAnimalAvatar}>
       <group ref={rightLegRef} position={[-0.045, 0.1, 0]}>
         {bottomStyle === "shorts" ? (
           <>
@@ -953,6 +1235,7 @@ export const AgentModel = memo(function AgentModel({
         <boxGeometry args={[0.014, 0.014, 0.01]} />
         <meshBasicMaterial color="#9c4a4a" />
       </mesh>
+      </group>
       <mesh
         ref={pulseRingRef}
         position={[0, 0.005, 0]}
@@ -971,27 +1254,36 @@ export const AgentModel = memo(function AgentModel({
       {!activeSpeechBubble && name ? (
         <Billboard position={[0, 1.05, 0]}>
           <mesh position={[0, 0, -0.001]}>
-            <planeGeometry args={[0.82, 0.24]} />
+            <planeGeometry args={[nameplateWidth, 0.24]} />
             <meshBasicMaterial color="#080c14" transparent opacity={0.9} />
           </mesh>
-          <mesh position={[-0.392, 0, 0]}>
-            <planeGeometry args={[0.028, 0.24]} />
+          <mesh
+            position={[-nameplateWidth / 2 + nameplateStripeWidth / 2, 0, 0]}
+          >
+            <planeGeometry args={[nameplateStripeWidth, 0.24]} />
             <meshBasicMaterial color={color} />
           </mesh>
-          <mesh position={[0.355, 0, 0]}>
-            <circleGeometry args={[0.052, 14]} />
+          <mesh
+            position={[
+              nameplateWidth / 2 - nameplateStatusDotRadius - 0.02,
+              0,
+              0,
+            ]}
+          >
+            <circleGeometry args={[nameplateStatusDotRadius, 14]} />
             <meshBasicMaterial ref={statusDotMatRef} color="#ef4444" />
           </mesh>
           <Text
-            position={[-0.02, 0, 0.001]}
+            position={[nameplateTextCenterX, 0, 0.001]}
             fontSize={0.16}
             color="#e8dfc0"
             anchorX="center"
             anchorY="middle"
-            maxWidth={0.68}
+            maxWidth={nameplateTextMaxWidth}
+            whiteSpace="nowrap"
             font={undefined}
           >
-            {name}
+            {displayName}
           </Text>
         </Billboard>
       ) : null}

@@ -9,7 +9,7 @@ import {
   Armchair,
   Settings2,
   Camera,
-  Users,
+  ChevronDown,
   X,
 } from "lucide-react";
 import {
@@ -177,6 +177,8 @@ import {
 } from "@/features/retro-office/objects/primitives";
 import {
   FloorAndWalls as SceneFloorAndWalls,
+  MemorialWallPictures as SceneMemorialWallPictures,
+  type MemorialWallPortrait,
   WallPictures as SceneWallPictures,
 } from "@/features/retro-office/scene/environment";
 import {
@@ -198,6 +200,33 @@ import {
   WeatherOverlay as WeatherAmbientOverlay,
 } from "@/features/retro-office/systems/visualSystems";
 import type { OfficeCleaningCue } from "@/lib/office/janitorReset";
+import { getZooSpeciesMeta } from "@/lib/office/catColony";
+import {
+  GARFIELD_COMPANION,
+  GARFIELD_MEOW_LINES,
+  GARFIELD_PET_AGENT_LINES,
+  GARFIELD_PET_LINES,
+  randomGarfieldIntervalMs,
+  randomGarfieldMeowBurstCount,
+  randomGarfieldMeowPauseMs,
+  randomGarfieldPettingMeowIntervalMs,
+  randomGarfieldSittingMeowIntervalMs,
+} from "@/lib/office/garfield";
+import {
+  CAT_TOPIA_DEFAULT_SETTINGS,
+  CAT_TOPIA_MAX_SPAWN_RATE_PER_HOUR,
+  CAT_TOPIA_MAX_SESSION_CAT_CAP,
+  CAT_TOPIA_MIN_SPAWN_RATE_PER_HOUR,
+  CAT_TOPIA_MAIN_NAME_MAX_CHARS,
+  CAT_TOPIA_MIN_SESSION_CAT_CAP,
+  CAT_TOPIA_NAMING_CONVENTION_MAX_CHARS,
+  CAT_TOPIA_NAMING_PRESETS,
+  ZOO_SPECIES_OPTIONS,
+  normalizeCatTopiaSettings,
+  resolveCatCuddleProfile,
+  type CatTopiaSettings,
+  type ZooSpecies,
+} from "@/lib/office/catTopia";
 
 type OfficeDeskMonitorMap = Record<string, OfficeDeskMonitor>;
 type RenderAgentUiSnapshot = Pick<RenderAgent, "state" | "status">;
@@ -223,6 +252,60 @@ const SMS_CONTACT_SEED_NAMES = [
   "Gabriel",
   "Zoe",
 ] as const;
+
+const SPEECH_BUBBLE_TEXT_MAX_CHARS = 140;
+const STATUS_FEED_TEXT_MAX_CHARS = 120;
+
+const INTERNAL_SUBAGENT_EVENT_RE =
+  /\[internal task completion event\]|\bsource:\s*subagent\b/i;
+
+const extractRuntimeContextField = (value: string, field: string): string => {
+  const escapedField = field.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = value.match(new RegExp(`(?:^|\\n)${escapedField}:\\s*(.+)$`, "im"));
+  return match?.[1]?.trim() ?? "";
+};
+
+const clampWithSentenceBoundary = (value: string, maxChars: number): string => {
+  if (value.length <= maxChars) return value;
+  const hardLimit = value.slice(0, maxChars - 1).trimEnd();
+  const sentenceCut = Math.max(
+    hardLimit.lastIndexOf(". "),
+    hardLimit.lastIndexOf("! "),
+    hardLimit.lastIndexOf("? "),
+  );
+  if (sentenceCut >= Math.floor(maxChars * 0.45)) {
+    return `${hardLimit.slice(0, sentenceCut + 1).trimEnd()}…`;
+  }
+  const clauseCut = hardLimit.lastIndexOf("; ");
+  if (clauseCut >= Math.floor(maxChars * 0.5)) {
+    return `${hardLimit.slice(0, clauseCut + 1).trimEnd()}…`;
+  }
+  return `${hardLimit}…`;
+};
+
+const summarizeOrchestrationText = (value: string): string | null => {
+  if (!INTERNAL_SUBAGENT_EVENT_RE.test(value)) return null;
+  const status = extractRuntimeContextField(value, "status");
+  const cleanTask =
+    extractRuntimeContextField(value, "Clean Task") ||
+    extractRuntimeContextField(value, "task");
+  const sessionKey = extractRuntimeContextField(value, "session_key");
+  const sourceAgentMatch = sessionKey.match(/^agent:([^:]+):/i);
+  const sourceAgent = sourceAgentMatch?.[1]?.trim() ?? "";
+  const statusLabel = status || "update received";
+  const prefix = sourceAgent ? `Sub-agent ${sourceAgent}` : "Sub-agent";
+  const summary = cleanTask
+    ? `${prefix} ${statusLabel}. ${cleanTask}`
+    : `${prefix} ${statusLabel}.`;
+  return summary.replace(/\s+/g, " ").trim();
+};
+
+const clampOverlayText = (value: string, maxChars: number): string => {
+  const orchestratedSummary = summarizeOrchestrationText(value);
+  const compact = (orchestratedSummary ?? value).replace(/\s+/g, " ").trim();
+  if (!compact) return "";
+  return clampWithSentenceBoundary(compact, maxChars);
+};
 
 const normalizeSmsContactName = (value: string): string =>
   value.replace(/\s+/g, " ").trim() || "Joseph";
@@ -251,6 +334,269 @@ const buildSmsContactList = (
     targetIndex: beforeCount,
   };
 };
+
+const GARFIELD_INTERACTION_DISTANCE = 36;
+const CAT_TO_CAT_MIN_DISTANCE = AGENT_RADIUS * 1.45;
+const CAT_TO_HUMAN_MIN_DISTANCE = AGENT_RADIUS * 1.7;
+const CAT_COLLISION_NUDGE_DISTANCE = AGENT_RADIUS * 0.9;
+const CAT_STALL_DISTANCE_THRESHOLD = 2.5;
+const CAT_STALL_TIMEOUT_MS = 10_000;
+const ANIMAL_PROXIMITY_LIMIT_MS = 9_000;
+const ANIMAL_PROXIMITY_STILL_AFTER_MS = 10_000;
+const ANIMAL_PROXIMITY_FORCE_SEPARATE_AFTER_MS = 14_000;
+const ANIMAL_PAIR_PROXIMITY_COOLDOWN_MS = 16_000;
+const ANIMAL_SEPARATION_COOLDOWN_MS = 20_000;
+const ANIMAL_FORCE_APART_DISTANCE = AGENT_RADIUS * 6;
+const SYNTHETIC_CAT_ID_PREFIX = "garfield-cat-";
+const SYNTHETIC_ANIMAL_ID_PREFIX = "zootopia-animal-";
+const GARFIELD_HOME_TARGET = {
+  x: GARFIELD_COMPANION.home.x,
+  y: GARFIELD_COMPANION.home.y,
+  facing: GARFIELD_COMPANION.home.facing,
+};
+const GARFIELD_HOME_ROUTE = {
+  key: "home",
+  approachX: GARFIELD_HOME_TARGET.x,
+  approachY: GARFIELD_HOME_TARGET.y,
+  targetX: GARFIELD_HOME_TARGET.x,
+  targetY: GARFIELD_HOME_TARGET.y,
+  facing: GARFIELD_HOME_TARGET.facing,
+  elevation: 0,
+};
+const CAT_PERCHABLE_ITEM_TYPES = new Set([
+  "couch",
+  "couch_v",
+  "round_table",
+  "table_rect",
+  "pingpong",
+]);
+const GARFIELD_PERCH_ELEVATION_BY_TYPE: Record<string, number> = {
+  couch: 0.08,
+  couch_v: 0.08,
+  round_table: 0.12,
+  table_rect: 0.1,
+  pingpong: 0.14,
+};
+const GARFIELD_PERCH_LOCAL_OFFSET_BY_TYPE: Record<
+  string,
+  { x: number; y: number }
+> = {
+  // Bias toward cushion center instead of strict geometric center.
+  couch: { x: 0, y: 4 },
+  couch_v: { x: 0, y: 6 },
+  pingpong: { x: 0, y: 0 },
+  round_table: { x: 0, y: 0 },
+  table_rect: { x: 0, y: 0 },
+};
+const GARFIELD_PERCH_APPROACH_MARGIN_BY_TYPE: Record<string, number> = {
+  couch: 26,
+  couch_v: 26,
+  round_table: 26,
+  table_rect: 24,
+  pingpong: 28,
+};
+
+type GarfieldCompanionTarget = {
+  key: string;
+  approachX: number;
+  approachY: number;
+  targetX: number;
+  targetY: number;
+  facing: number;
+  elevation: number;
+};
+
+type GarfieldMeowBurstState = {
+  remaining: number;
+  nextAt: number;
+};
+
+const pickRandomLine = (lines: readonly string[], fallback: string): string => {
+  if (!Array.isArray(lines) || lines.length === 0) return fallback;
+  return lines[Math.floor(Math.random() * lines.length)] ?? fallback;
+};
+
+const hashAgentId = (agentId: string): number =>
+  [...agentId].reduce((total, character) => total + character.charCodeAt(0), 0);
+
+const isAnimalActor = (agent: unknown): boolean =>
+  Boolean(
+    agent &&
+      typeof agent === "object" &&
+      "avatarKind" in agent &&
+      ((agent as { avatarKind?: string }).avatarKind === "cat" ||
+        (agent as { avatarKind?: string }).avatarKind === "animal"),
+  );
+
+const clampCanvasPoint = (x: number, y: number) => ({
+  x: Math.max(SNAP_GRID, Math.min(CANVAS_W - SNAP_GRID, Math.round(x))),
+  y: Math.max(SNAP_GRID, Math.min(CANVAS_H - SNAP_GRID, Math.round(y))),
+});
+
+const clampCanvasFloatPoint = (x: number, y: number) => ({
+  x: Math.max(SNAP_GRID, Math.min(CANVAS_W - SNAP_GRID, x)),
+  y: Math.max(SNAP_GRID, Math.min(CANVAS_H - SNAP_GRID, y)),
+});
+
+const resolveFacingTowards = (
+  fromX: number,
+  fromY: number,
+  toX: number,
+  toY: number,
+) => Math.atan2(toX - fromX, toY - fromY);
+
+const resolveCatPerchRoutePoint = (
+  target: GarfieldCompanionTarget,
+  stage: "approach" | "climb" | "perched",
+) =>
+  stage === "approach"
+    ? { x: target.approachX, y: target.approachY }
+    : { x: target.targetX, y: target.targetY };
+
+const resolveCatLoungeTarget = (
+  agentId: string,
+  anchor: { targetX: number; targetY: number },
+  interactionDistance = GARFIELD_INTERACTION_DISTANCE,
+) => {
+  const hash = hashAgentId(agentId);
+  const angle = (hash % 360) * (Math.PI / 180);
+  const rawX = anchor.targetX + Math.cos(angle) * interactionDistance;
+  const rawY = anchor.targetY + Math.sin(angle) * interactionDistance;
+  const point = clampCanvasPoint(rawX, rawY);
+  return {
+    targetX: point.x,
+    targetY: point.y,
+    facing: resolveFacingTowards(
+      point.x,
+      point.y,
+      anchor.targetX,
+      anchor.targetY,
+    ),
+  };
+};
+
+const buildFloorCatRouteTarget = (
+  key: string,
+  x: number,
+  y: number,
+  facing = GARFIELD_HOME_TARGET.facing,
+): GarfieldCompanionTarget => {
+  const point = clampCanvasPoint(x, y);
+  return {
+    key,
+    approachX: point.x,
+    approachY: point.y,
+    targetX: point.x,
+    targetY: point.y,
+    facing,
+    elevation: 0,
+  };
+};
+
+const buildCuddleVariantTarget = (
+  baseTarget: GarfieldCompanionTarget,
+  catId: string,
+): GarfieldCompanionTarget => {
+  const hash = hashAgentId(`${catId}:${baseTarget.key}`);
+  const angle = (hash % 360) * (Math.PI / 180);
+  const radius = 14 + (hash % 14);
+  const target = clampCanvasPoint(
+    baseTarget.targetX + Math.cos(angle) * radius,
+    baseTarget.targetY + Math.sin(angle) * radius,
+  );
+  const approach = clampCanvasPoint(
+    baseTarget.approachX + Math.cos(angle) * Math.max(8, radius - 6),
+    baseTarget.approachY + Math.sin(angle) * Math.max(8, radius - 6),
+  );
+  return {
+    key: `${baseTarget.key}:cuddle:${hash % 97}`,
+    approachX: approach.x,
+    approachY: approach.y,
+    targetX: target.x,
+    targetY: target.y,
+    facing: resolveFacingTowards(
+      target.x,
+      target.y,
+      baseTarget.targetX,
+      baseTarget.targetY,
+    ),
+    elevation: baseTarget.elevation,
+  };
+};
+
+const resolveGarfieldPerchTargets = (
+  furniture: FurnitureItem[],
+): GarfieldCompanionTarget[] => {
+  const targets: GarfieldCompanionTarget[] = [];
+  for (const item of furniture) {
+    const itemType = resolveItemTypeKey(item);
+    if (!CAT_PERCHABLE_ITEM_TYPES.has(itemType)) continue;
+    const { width, height } = getItemBaseSize(item);
+    const rotation = getItemRotationRadians(item);
+    const localOffset = GARFIELD_PERCH_LOCAL_OFFSET_BY_TYPE[itemType] ?? {
+      x: 0,
+      y: 0,
+    };
+    const rotatedOffsetX =
+      localOffset.x * Math.cos(rotation) - localOffset.y * Math.sin(rotation);
+    const rotatedOffsetY =
+      localOffset.x * Math.sin(rotation) + localOffset.y * Math.cos(rotation);
+    const point = clampCanvasPoint(
+      item.x + width / 2 + rotatedOffsetX,
+      item.y + height / 2 + rotatedOffsetY,
+    );
+    const approachMargin =
+      GARFIELD_PERCH_APPROACH_MARGIN_BY_TYPE[itemType] ?? 24;
+    // Approach from the "front" side first so cat walks up to the object edge
+    // before climbing onto the surface.
+    const frontLocalOffset = {
+      x: 0,
+      y: height / 2 + approachMargin,
+    };
+    const approachOffsetX =
+      frontLocalOffset.x * Math.cos(rotation) -
+      frontLocalOffset.y * Math.sin(rotation);
+    const approachOffsetY =
+      frontLocalOffset.x * Math.sin(rotation) +
+      frontLocalOffset.y * Math.cos(rotation);
+    const approachPoint = clampCanvasPoint(
+      item.x + width / 2 + approachOffsetX,
+      item.y + height / 2 + approachOffsetY,
+    );
+    targets.push({
+      key: `furniture:${item._uid}`,
+      approachX: approachPoint.x,
+      approachY: approachPoint.y,
+      targetX: point.x,
+      targetY: point.y,
+      facing:
+        typeof item.facing === "number" && Number.isFinite(item.facing)
+          ? getItemRotationRadians(item)
+          : GARFIELD_HOME_TARGET.facing,
+      elevation: GARFIELD_PERCH_ELEVATION_BY_TYPE[itemType] ?? 0.1,
+    });
+  }
+  return targets;
+};
+
+const buildInitialOfficeFurniture = (): FurnitureItem[] =>
+  ensureOfficeQaLab(
+    ensureOfficeGymRoom(
+      ensureOfficeServerRoom(
+        ensureOfficePhoneBooth(
+          ensureOfficeSmsBooth(
+            ensureOfficeAtm(
+              ensureOfficePingPongTable(
+                (loadFurniture() ?? materializeDefaults()).filter(
+                  (item) => !isRetiredPingPongLamp(item),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
 
 type PaletteEntry = {
   type: string;
@@ -459,14 +805,30 @@ function useAgentTick(
   lastSeenByAgentId: Record<string, number> = {},
   deskHoldByAgentId: Record<string, boolean> = {},
   gymHoldByAgentId: Record<string, boolean> = {},
+  catHoldByAgentId: Record<string, boolean> = {},
   smsBoothHoldByAgentId: Record<string, boolean> = {},
   phoneBoothHoldByAgentId: Record<string, boolean> = {},
   qaHoldByAgentId: Record<string, boolean> = {},
   githubReviewByAgentId: Record<string, boolean> = {},
+  catCompanionTargetByAgentId: Record<string, GarfieldCompanionTarget> = {},
+  catMovementPausedByAgentId: Record<string, boolean> = {},
   standupMeeting: StandupMeeting | null = null,
+  catCuddleLevel: CatTopiaSettings["catCuddleLevel"] = "normal",
 ) {
   const renderAgentsRef = useRef<RenderAgent[]>([]);
   const renderAgentLookupRef = useRef<Map<string, RenderAgent>>(new Map());
+  const cuddleProfile = useMemo(
+    () => resolveCatCuddleProfile(catCuddleLevel),
+    [catCuddleLevel],
+  );
+  const catLoungeInteractionDistance =
+    GARFIELD_INTERACTION_DISTANCE * cuddleProfile.interactionDistanceScale;
+  const catToCatMinDistance =
+    CAT_TO_CAT_MIN_DISTANCE * cuddleProfile.catSpacingScale;
+  const catToHumanMinDistance =
+    CAT_TO_HUMAN_MIN_DISTANCE * cuddleProfile.humanSpacingScale;
+  const catCollisionNudgeDistance =
+    CAT_COLLISION_NUDGE_DISTANCE * cuddleProfile.nudgeScale;
   const deskByAgentRef = useRef<Map<string, number>>(new Map());
   const gymByAgentRef = useRef<Map<string, number>>(new Map());
   const qaByAgentRef = useRef<Map<string, number>>(new Map());
@@ -590,12 +952,47 @@ function useAgentTick(
         );
         nextQaRef.current += 1;
       }
+      const explicitMeetingHold =
+        standupActive && meetingParticipants.has(agent.id);
+      const meetingTarget = explicitMeetingHold
+        ? resolveMeetingTarget(agent.id)
+        : null;
       const explicitDeskHold = Boolean(deskHoldByAgentId[agent.id]);
       const explicitGymHold = Boolean(gymHoldByAgentId[agent.id]);
       const explicitSmsBoothHold = Boolean(smsBoothHoldByAgentId[agent.id]);
       const explicitPhoneBoothHold = Boolean(phoneBoothHoldByAgentId[agent.id]);
       const explicitQaHold = Boolean(qaHoldByAgentId[agent.id]);
       const explicitGithubHold = Boolean(githubReviewByAgentId[agent.id]);
+      const isCatCompanion =
+        "avatarKind" in agent &&
+        (agent.avatarKind === "cat" || agent.avatarKind === "animal");
+      const hasHighPriorityHold =
+        explicitGymHold ||
+        explicitSmsBoothHold ||
+        explicitPhoneBoothHold ||
+        explicitQaHold ||
+        explicitGithubHold;
+      const explicitCatHold =
+        !isCatCompanion &&
+        !explicitMeetingHold &&
+        !hasHighPriorityHold &&
+        Boolean(catHoldByAgentId[agent.id]);
+      const catPatrolTarget = isCatCompanion
+        ? (catCompanionTargetByAgentId[agent.id] ?? GARFIELD_HOME_ROUTE)
+        : null;
+      const catPatrolTargetSafe = catPatrolTarget ?? GARFIELD_HOME_ROUTE;
+      const explicitCatCompanionPatrol =
+        isCatCompanion &&
+        !Boolean(catMovementPausedByAgentId[agent.id]) &&
+        Boolean(catPatrolTarget);
+      const explicitCatCompanionPausedByPet =
+        isCatCompanion && Boolean(catMovementPausedByAgentId[agent.id]);
+      const explicitCatCompanionHomeHold =
+        isCatCompanion &&
+        !explicitMeetingHold &&
+        !hasHighPriorityHold &&
+        !explicitCatCompanionPatrol &&
+        !explicitCatCompanionPausedByPet;
       if (
         explicitGymHold &&
         gymWorkoutLocations.length > 0 &&
@@ -637,17 +1034,65 @@ function useAgentTick(
         ...QA_LAB_DEFAULT_TARGET,
         stationType: "console" as const,
       };
-      const explicitMeetingHold =
-        standupActive && meetingParticipants.has(agent.id);
-      const meetingTarget = explicitMeetingHold
-        ? resolveMeetingTarget(agent.id)
-        : null;
       const smsBoothItem =
         (furnitureRef.current ?? []).find((item) => item.type === "sms_booth") ??
         null;
       const phoneBoothItem =
         (furnitureRef.current ?? []).find((item) => item.type === "phone_booth") ??
         null;
+      const currentGarfieldActor =
+        currentMap.get(GARFIELD_COMPANION.agentId) ?? null;
+      const availableCatAnchors = [...currentMap.values(), ...next].filter(
+        (candidate) =>
+          "avatarKind" in candidate &&
+          (candidate.avatarKind === "cat" || candidate.avatarKind === "animal"),
+      );
+      const loungeOriginX = existing?.x ?? GARFIELD_HOME_ROUTE.targetX;
+      const loungeOriginY = existing?.y ?? GARFIELD_HOME_ROUTE.targetY;
+      let catLoungeAnchor = GARFIELD_HOME_ROUTE;
+      if (availableCatAnchors.length > 0) {
+        let nearestCat = availableCatAnchors[0];
+        let nearestDistance = Math.hypot(
+          nearestCat.x - loungeOriginX,
+          nearestCat.y - loungeOriginY,
+        );
+        for (const candidateCat of availableCatAnchors) {
+          const distance = Math.hypot(
+            candidateCat.x - loungeOriginX,
+            candidateCat.y - loungeOriginY,
+          );
+          if (distance < nearestDistance) {
+            nearestDistance = distance;
+            nearestCat = candidateCat;
+          }
+        }
+        catLoungeAnchor = {
+          targetX: nearestCat.x,
+          targetY: nearestCat.y,
+          facing: nearestCat.facing,
+          key: `anchor:${nearestCat.id}`,
+          approachX: nearestCat.x,
+          approachY: nearestCat.y,
+          elevation: nearestCat.elevationOffset ?? 0,
+        };
+      } else if (catPatrolTarget) {
+        catLoungeAnchor = catPatrolTargetSafe;
+      } else if (currentGarfieldActor) {
+        catLoungeAnchor = {
+          targetX: currentGarfieldActor.x,
+          targetY: currentGarfieldActor.y,
+          facing: currentGarfieldActor.facing,
+          key: "anchor:garfield",
+          approachX: currentGarfieldActor.x,
+          approachY: currentGarfieldActor.y,
+          elevation: currentGarfieldActor.elevationOffset ?? 0,
+        };
+      }
+      const catLoungeRoute = resolveCatLoungeTarget(
+        agent.id,
+        catLoungeAnchor,
+        catLoungeInteractionDistance,
+      );
 
       if (agent.status === "working" && !explicitDeskHold && deskPos)
         stickyUntilRef.current.set(agent.id, now + DESK_STICKY_MS);
@@ -662,6 +1107,10 @@ function useAgentTick(
               explicitPhoneBoothHold ||
               explicitQaHold ||
               explicitGithubHold ||
+              explicitCatHold ||
+              explicitCatCompanionPatrol ||
+              explicitCatCompanionPausedByPet ||
+              explicitCatCompanionHomeHold ||
               agent.status === "working" ||
               stickyUntil > now
             ? "working"
@@ -670,6 +1119,18 @@ function useAgentTick(
       let ns: Partial<RenderAgent> = {};
       if (existing) {
         ns = { ...existing };
+        if (isCatCompanion) {
+          const activityMultiplier =
+            "activityMultiplier" in agent ? agent.activityMultiplier : undefined;
+          ns.walkSpeed =
+            WALK_SPEED *
+            Math.max(0.5, Math.min(1.5, activityMultiplier ?? 1));
+        }
+        if (!isCatCompanion) {
+          ns.elevationOffset = undefined;
+          ns.catPerchStage = undefined;
+          ns.catPerchKey = undefined;
+        }
         if (explicitMeetingHold && meetingTarget) {
           ns.pingPongUntil = undefined;
           ns.pingPongTargetX = undefined;
@@ -937,6 +1398,203 @@ function useAgentTick(
               ? "standing"
               : "walking";
           ns.facing = phoneBoothRoute.facing;
+        } else if (explicitCatCompanionPausedByPet) {
+          ns.pingPongUntil = undefined;
+          ns.pingPongTargetX = undefined;
+          ns.pingPongTargetY = undefined;
+          ns.pingPongFacing = undefined;
+          ns.pingPongPartnerId = undefined;
+          ns.pingPongTableUid = undefined;
+          ns.pingPongSide = undefined;
+          ns.walkSpeed =
+            existing.pingPongPreviousWalkSpeed ?? existing.walkSpeed;
+          ns.pingPongPreviousWalkSpeed = undefined;
+          ns.interactionTarget = "cat_lounge";
+          ns.smsBoothStage = undefined;
+          ns.phoneBoothStage = undefined;
+          ns.serverRoomStage = undefined;
+          ns.gymStage = undefined;
+          ns.qaLabStage = undefined;
+          ns.qaLabStationType = undefined;
+          ns.workoutStyle = undefined;
+          ns.targetX = existing.x;
+          ns.targetY = existing.y;
+          ns.path = [];
+          ns.state = "standing";
+          ns.facing = existing.facing;
+          const pauseStage = existing.catPerchStage ?? "approach";
+          const keepElevated =
+            pauseStage === "climb" || pauseStage === "perched";
+          ns.elevationOffset = keepElevated
+            ? (existing.elevationOffset ?? catPatrolTargetSafe.elevation)
+            : 0;
+          ns.catPerchStage = pauseStage;
+          ns.catPerchKey = existing.catPerchKey ?? catPatrolTargetSafe.key;
+        } else if (explicitCatCompanionPatrol) {
+          ns.pingPongUntil = undefined;
+          ns.pingPongTargetX = undefined;
+          ns.pingPongTargetY = undefined;
+          ns.pingPongFacing = undefined;
+          ns.pingPongPartnerId = undefined;
+          ns.pingPongTableUid = undefined;
+          ns.pingPongSide = undefined;
+          ns.walkSpeed =
+            existing.pingPongPreviousWalkSpeed ?? existing.walkSpeed;
+          ns.pingPongPreviousWalkSpeed = undefined;
+          ns.interactionTarget = "cat_lounge";
+          ns.smsBoothStage = undefined;
+          ns.phoneBoothStage = undefined;
+          ns.serverRoomStage = undefined;
+          ns.gymStage = undefined;
+          ns.qaLabStage = undefined;
+          ns.qaLabStationType = undefined;
+          ns.workoutStyle = undefined;
+          const targetKeyChanged =
+            existing.catPerchKey !== catPatrolTargetSafe.key;
+          let catPerchStage: "approach" | "climb" | "perched" =
+            targetKeyChanged
+              ? "approach"
+              : existing.catPerchStage ?? "approach";
+          const approachDistance = Math.hypot(
+            existing.x - catPatrolTargetSafe.approachX,
+            existing.y - catPatrolTargetSafe.approachY,
+          );
+          const perchDistance = Math.hypot(
+            existing.x - catPatrolTargetSafe.targetX,
+            existing.y - catPatrolTargetSafe.targetY,
+          );
+          if (catPerchStage === "approach" && approachDistance < 14) {
+            catPerchStage = "climb";
+          }
+          if (catPerchStage === "climb" && perchDistance < 12) {
+            catPerchStage = "perched";
+          }
+          const routePoint = resolveCatPerchRoutePoint(
+            catPatrolTargetSafe,
+            catPerchStage,
+          );
+          const targetChanged =
+            existing.targetX !== routePoint.x ||
+            existing.targetY !== routePoint.y ||
+            targetKeyChanged;
+          ns.targetX = routePoint.x;
+          ns.targetY = routePoint.y;
+          if (targetChanged) {
+            ns.path = planPath(
+              existing.x,
+              existing.y,
+              routePoint.x,
+              routePoint.y,
+            );
+          }
+          const routeDistance = Math.hypot(
+            existing.x - routePoint.x,
+            existing.y - routePoint.y,
+          );
+          ns.state =
+            routeDistance < 12
+              ? catPerchStage === "perched"
+                ? "sitting"
+                : "standing"
+              : "walking";
+          ns.facing =
+            catPerchStage === "perched"
+              ? catPatrolTargetSafe.facing
+              : resolveFacingTowards(
+                  existing.x,
+                  existing.y,
+                  catPatrolTargetSafe.targetX,
+                  catPatrolTargetSafe.targetY,
+                );
+          ns.elevationOffset =
+            catPerchStage === "climb" || catPerchStage === "perched"
+              ? catPatrolTargetSafe.elevation
+              : 0;
+          ns.catPerchStage = catPerchStage;
+          ns.catPerchKey = catPatrolTargetSafe.key;
+        } else if (explicitCatCompanionHomeHold) {
+          ns.pingPongUntil = undefined;
+          ns.pingPongTargetX = undefined;
+          ns.pingPongTargetY = undefined;
+          ns.pingPongFacing = undefined;
+          ns.pingPongPartnerId = undefined;
+          ns.pingPongTableUid = undefined;
+          ns.pingPongSide = undefined;
+          ns.walkSpeed =
+            existing.pingPongPreviousWalkSpeed ?? existing.walkSpeed;
+          ns.pingPongPreviousWalkSpeed = undefined;
+          ns.interactionTarget = "cat_lounge";
+          ns.smsBoothStage = undefined;
+          ns.phoneBoothStage = undefined;
+          ns.serverRoomStage = undefined;
+          ns.gymStage = undefined;
+          ns.qaLabStage = undefined;
+          ns.qaLabStationType = undefined;
+          ns.workoutStyle = undefined;
+          const targetChanged =
+            existing.targetX !== GARFIELD_HOME_TARGET.x ||
+            existing.targetY !== GARFIELD_HOME_TARGET.y;
+          ns.targetX = GARFIELD_HOME_TARGET.x;
+          ns.targetY = GARFIELD_HOME_TARGET.y;
+          if (targetChanged) {
+            ns.path = planPath(
+              existing.x,
+              existing.y,
+              GARFIELD_HOME_TARGET.x,
+              GARFIELD_HOME_TARGET.y,
+            );
+          }
+          ns.state =
+            Math.hypot(
+              existing.x - GARFIELD_HOME_TARGET.x,
+              existing.y - GARFIELD_HOME_TARGET.y,
+            ) < 15
+              ? "standing"
+              : "walking";
+          ns.facing = GARFIELD_HOME_TARGET.facing;
+          ns.elevationOffset = 0;
+          ns.catPerchStage = undefined;
+          ns.catPerchKey = undefined;
+        } else if (explicitCatHold) {
+          ns.pingPongUntil = undefined;
+          ns.pingPongTargetX = undefined;
+          ns.pingPongTargetY = undefined;
+          ns.pingPongFacing = undefined;
+          ns.pingPongPartnerId = undefined;
+          ns.pingPongTableUid = undefined;
+          ns.pingPongSide = undefined;
+          ns.walkSpeed =
+            existing.pingPongPreviousWalkSpeed ?? existing.walkSpeed;
+          ns.pingPongPreviousWalkSpeed = undefined;
+          ns.interactionTarget = "cat_lounge";
+          ns.smsBoothStage = undefined;
+          ns.phoneBoothStage = undefined;
+          ns.serverRoomStage = undefined;
+          ns.gymStage = undefined;
+          ns.qaLabStage = undefined;
+          ns.qaLabStationType = undefined;
+          ns.workoutStyle = undefined;
+          const targetChanged =
+            existing.targetX !== catLoungeRoute.targetX ||
+            existing.targetY !== catLoungeRoute.targetY;
+          ns.targetX = catLoungeRoute.targetX;
+          ns.targetY = catLoungeRoute.targetY;
+          if (targetChanged) {
+            ns.path = planPath(
+              existing.x,
+              existing.y,
+              catLoungeRoute.targetX,
+              catLoungeRoute.targetY,
+            );
+          }
+          ns.state =
+            Math.hypot(
+              existing.x - catLoungeRoute.targetX,
+              existing.y - catLoungeRoute.targetY,
+            ) < 15
+              ? "standing"
+              : "walking";
+          ns.facing = catLoungeRoute.facing;
         } else if (effectiveStatus === "working" && deskPos) {
           ns.pingPongUntil = undefined;
           ns.pingPongTargetX = undefined;
@@ -1010,6 +1668,15 @@ function useAgentTick(
           ns.path = [];
           ns.state = "standing";
         }
+        if (
+          isCatCompanion &&
+          !explicitCatCompanionPatrol &&
+          !explicitCatCompanionPausedByPet
+        ) {
+          ns.elevationOffset = 0;
+          ns.catPerchStage = undefined;
+          ns.catPerchKey = undefined;
+        }
         if (effectiveStatus !== existing.status) {
           if (effectiveStatus === "working") {
             const serverRoomRoute = resolveServerRoomRoute(
@@ -1053,11 +1720,26 @@ function useAgentTick(
                       }
                   : explicitQaHold
                     ? { x: qaLabRoute.targetX, y: qaLabRoute.targetY }
-                    : explicitGithubHold
+                  : explicitGithubHold
                       ? {
                           x: serverRoomRoute.targetX,
                           y: serverRoomRoute.targetY,
                         }
+                      : explicitCatCompanionPatrol
+                        ? {
+                            x: catPatrolTargetSafe.approachX,
+                            y: catPatrolTargetSafe.approachY,
+                          }
+                        : explicitCatCompanionHomeHold
+                          ? {
+                              x: GARFIELD_HOME_TARGET.x,
+                              y: GARFIELD_HOME_TARGET.y,
+                            }
+                          : explicitCatHold
+                            ? {
+                                x: catLoungeRoute.targetX,
+                                y: catLoungeRoute.targetY,
+                              }
                       : deskPos;
             if (!nextTarget) {
               ns.interactionTarget = undefined;
@@ -1087,9 +1769,11 @@ function useAgentTick(
                   ? "phone_booth"
                 : explicitQaHold
                   ? "qa_lab"
-                  : explicitGithubHold
-                    ? "server_room"
-                    : "desk";
+                : explicitGithubHold
+                  ? "server_room"
+                  : explicitCatCompanionPatrol || explicitCatCompanionHomeHold || explicitCatHold
+                    ? "cat_lounge"
+                  : "desk";
             ns.phoneBoothStage =
               explicitMeetingHold ||
               explicitGymHold ||
@@ -1100,6 +1784,9 @@ function useAgentTick(
             ns.smsBoothStage =
               explicitMeetingHold ||
               explicitGymHold ||
+              explicitCatCompanionPatrol ||
+              explicitCatCompanionHomeHold ||
+              explicitCatHold ||
               !explicitSmsBoothHold
                 ? undefined
                 : smsBoothRoute.stage;
@@ -1107,9 +1794,11 @@ function useAgentTick(
               ? undefined
               : explicitGymHold
                 ? undefined
-                : explicitSmsBoothHold
+              : explicitSmsBoothHold
                   ? undefined
                 : explicitPhoneBoothHold
+                  ? undefined
+                : explicitCatCompanionPatrol || explicitCatCompanionHomeHold || explicitCatHold
                   ? undefined
                 : explicitGithubHold
                   ? serverRoomRoute.stage
@@ -1124,6 +1813,8 @@ function useAgentTick(
               : explicitSmsBoothHold
                 ? undefined
               : explicitPhoneBoothHold
+                ? undefined
+              : explicitCatCompanionPatrol || explicitCatCompanionHomeHold || explicitCatHold
                 ? undefined
               : explicitQaHold
                 ? qaLabRoute.stage
@@ -1204,16 +1895,31 @@ function useAgentTick(
                       x: phoneBoothRoute.targetX,
                       y: phoneBoothRoute.targetY,
                     }
-                : explicitQaHold
-                  ? {
-                      x: qaLabRoute.targetX,
-                      y: qaLabRoute.targetY,
-                    }
-                  : explicitGithubHold
+                  : explicitQaHold
                     ? {
-                        x: serverRoomRoute.targetX,
-                        y: serverRoomRoute.targetY,
+                        x: qaLabRoute.targetX,
+                        y: qaLabRoute.targetY,
                       }
+                    : explicitGithubHold
+                      ? {
+                          x: serverRoomRoute.targetX,
+                          y: serverRoomRoute.targetY,
+                        }
+                    : explicitCatCompanionPatrol
+                      ? {
+                          x: catPatrolTargetSafe.approachX,
+                          y: catPatrolTargetSafe.approachY,
+                        }
+                      : explicitCatCompanionHomeHold
+                        ? {
+                            x: GARFIELD_HOME_TARGET.x,
+                            y: GARFIELD_HOME_TARGET.y,
+                          }
+                        : explicitCatHold
+                          ? {
+                              x: catLoungeRoute.targetX,
+                              y: catLoungeRoute.targetY,
+                            }
                     : (deskPos ?? { x: sx, y: sy })
             : { x: sx, y: sy };
         ns = {
@@ -1223,17 +1929,41 @@ function useAgentTick(
           targetY: initialTarget.y,
           path: planPath(sx, sy, initialTarget.x, initialTarget.y),
           frame: 0,
-          walkSpeed: WALK_SPEED * (0.7 + Math.random() * 0.6),
+          walkSpeed: isCatCompanion
+            ? WALK_SPEED *
+              Math.max(
+                0.5,
+                Math.min(
+                  1.5,
+                  ("activityMultiplier" in agent
+                    ? agent.activityMultiplier
+                    : undefined) ?? 1,
+                ),
+              )
+            : WALK_SPEED * (0.7 + Math.random() * 0.6),
           phaseOffset: Math.random() * Math.PI * 2,
-          state:
-            effectiveStatus === "working" &&
-            (explicitMeetingHold ||
-              explicitGymHold ||
-              explicitSmsBoothHold ||
-              explicitPhoneBoothHold ||
-              explicitQaHold ||
-              explicitGithubHold ||
-              deskPos)
+          elevationOffset: isCatCompanion
+            ? 0
+            : undefined,
+          catPerchStage:
+            isCatCompanion && explicitCatCompanionPatrol
+              ? "approach"
+              : undefined,
+          catPerchKey:
+            isCatCompanion && explicitCatCompanionPatrol
+              ? catPatrolTargetSafe.key
+              : undefined,
+          state: effectiveStatus === "working" &&
+                (explicitMeetingHold ||
+                  explicitGymHold ||
+                  explicitSmsBoothHold ||
+                  explicitPhoneBoothHold ||
+                  explicitQaHold ||
+                  explicitGithubHold ||
+                  explicitCatHold ||
+                  explicitCatCompanionPatrol ||
+                  explicitCatCompanionHomeHold ||
+                  deskPos)
               ? "walking"
               : "standing",
           interactionTarget: explicitMeetingHold
@@ -1248,17 +1978,27 @@ function useAgentTick(
                 ? "qa_lab"
                 : explicitGithubHold
                   ? "server_room"
+                  : explicitCatCompanionPatrol || explicitCatCompanionHomeHold || explicitCatHold
+                    ? "cat_lounge"
                   : deskPos
                     ? "desk"
                     : undefined,
           smsBoothStage:
-            explicitMeetingHold || explicitGymHold || !explicitSmsBoothHold
+            explicitMeetingHold ||
+            explicitGymHold ||
+            explicitCatCompanionPatrol ||
+            explicitCatCompanionHomeHold ||
+            explicitCatHold ||
+            !explicitSmsBoothHold
               ? undefined
               : smsBoothRoute.stage,
           phoneBoothStage:
             explicitMeetingHold ||
             explicitGymHold ||
             explicitSmsBoothHold ||
+            explicitCatCompanionPatrol ||
+            explicitCatCompanionHomeHold ||
+            explicitCatHold ||
             !explicitPhoneBoothHold
               ? undefined
               : phoneBoothRoute.stage,
@@ -1267,6 +2007,9 @@ function useAgentTick(
             explicitGymHold ||
             explicitSmsBoothHold ||
             explicitPhoneBoothHold ||
+            explicitCatCompanionPatrol ||
+            explicitCatCompanionHomeHold ||
+            explicitCatHold ||
             !explicitGithubHold
               ? undefined
               : serverRoomRoute.stage,
@@ -1278,6 +2021,9 @@ function useAgentTick(
             explicitMeetingHold ||
             explicitSmsBoothHold ||
             explicitPhoneBoothHold ||
+            explicitCatCompanionPatrol ||
+            explicitCatCompanionHomeHold ||
+            explicitCatHold ||
             !explicitQaHold
               ? undefined
               : qaLabRoute.stage,
@@ -1290,6 +2036,12 @@ function useAgentTick(
           facing:
             explicitMeetingHold && meetingTarget
               ? meetingTarget.facing
+              : explicitCatCompanionPatrol
+                ? catPatrolTargetSafe.facing
+                : explicitCatCompanionHomeHold
+                  ? GARFIELD_HOME_TARGET.facing
+                  : explicitCatHold
+                    ? catLoungeRoute.facing
               : Math.PI / 2,
         };
       }
@@ -1304,6 +2056,10 @@ function useAgentTick(
   }, [
     agents,
     assignedDeskIndexByAgentId,
+    catLoungeInteractionDistance,
+    catHoldByAgentId,
+    catCompanionTargetByAgentId,
+    catMovementPausedByAgentId,
     deskHoldByAgentId,
     deskLocations,
     furnitureRef,
@@ -1622,6 +2378,8 @@ function useAgentTick(
                   ? "working_out"
                   : agent.interactionTarget === "qa_lab"
                     ? "standing"
+                    : agent.interactionTarget === "cat_lounge"
+                      ? "standing"
                     : "sitting";
             if (agent.interactionTarget === "sms_booth") {
               nf = agent.facing;
@@ -1632,6 +2390,8 @@ function useAgentTick(
             } else if (agent.interactionTarget === "gym") {
               nf = agent.facing;
             } else if (agent.interactionTarget === "qa_lab") {
+              nf = agent.facing;
+            } else if (agent.interactionTarget === "cat_lounge") {
               nf = agent.facing;
             } else if (agent.interactionTarget === "meeting_room") {
               nf = agent.facing;
@@ -1753,9 +2513,12 @@ function useAgentTick(
     for (let i = 0; i < moved.length; i++) {
       const mi = moved[i];
       if ("role" in mi && mi.role === "janitor") continue;
+      const miIsCat = isAnimalActor(mi);
+      if (Boolean(catMovementPausedByAgentId[mi.id])) continue;
       if (
-        moved[i].state === "sitting" ||
-        moved[i].state === "working_out"
+        (moved[i].state === "sitting" ||
+          moved[i].state === "working_out") &&
+        !miIsCat
       )
         continue;
       if (moved[i].pingPongUntil !== undefined && moved[i].state !== "walking")
@@ -1776,10 +2539,17 @@ function useAgentTick(
             if (i === j) continue;
             const mj = moved[j];
             if ("role" in mj && mj.role === "janitor") continue;
+            if (Boolean(catMovementPausedByAgentId[mj.id])) continue;
+            const mjIsCat = isAnimalActor(mj);
             let ddx = moved[i].x - moved[j].x;
             let ddy = moved[i].y - moved[j].y;
             const d = Math.hypot(ddx, ddy);
-            const minDist = AGENT_RADIUS * 2;
+            const minDist =
+              miIsCat && mjIsCat
+                ? catToCatMinDistance
+                : miIsCat || mjIsCat
+                  ? catToHumanMinDistance
+                  : AGENT_RADIUS * 2;
             if (d < minDist) {
               // d=0 edge case: exact overlap — use a random direction to break symmetry.
               if (d === 0) {
@@ -1800,6 +2570,34 @@ function useAgentTick(
       if (sx === 0 && sy === 0) continue;
       const pushMag = Math.hypot(sx, sy);
       const norm = pushMag || 1;
+      if (miIsCat) {
+        const nudgeDistance = Math.max(
+          catCollisionNudgeDistance,
+          Math.min(catToHumanMinDistance * 0.65, pushMag * 8),
+        );
+        const nudgeTarget = clampCanvasFloatPoint(
+          moved[i].x + (sx / norm) * nudgeDistance,
+          moved[i].y + (sy / norm) * nudgeDistance,
+        );
+        moved[i] = {
+          ...moved[i],
+          x: nudgeTarget.x,
+          y: nudgeTarget.y,
+          state: "walking",
+          path: astar(
+            nudgeTarget.x,
+            nudgeTarget.y,
+            moved[i].targetX,
+            moved[i].targetY,
+            grid,
+          ),
+          facing: Math.atan2(sx, sy),
+          bumpedUntil: undefined,
+          bumpTalkUntil: undefined,
+          collisionCooldownUntil: now + 400,
+        };
+        continue;
+      }
       // Pick the roam point most aligned with the push direction as the escape target.
       let bestDot = -Infinity;
       let escapeTarget = ROAM_POINTS[0];
@@ -1843,7 +2641,6 @@ function useAgentTick(
 // ============================================================
 
 const AWAY_THRESHOLD_MS = 15 * 60 * 1000;
-const COMPACT_AGENT_BADGE_LIMIT = 6;
 
 const estimatePhoneSpeechDurationMs = (text: string | null | undefined): number => {
   const normalized = text?.trim() ?? "";
@@ -1852,20 +2649,118 @@ const estimatePhoneSpeechDurationMs = (text: string | null | undefined): number 
   return Math.max(5_000, Math.min(12_000, 1_800 + wordCount * 380));
 };
 
-const getAgentInitials = (name: string | null | undefined): string => {
-  const parts = (name ?? "").trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "?";
-  return parts
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase() ?? "")
-    .join("");
+type CatTopiaHelpField =
+  | "mainCatName"
+  | "enabledSpecies"
+  | "catVariety"
+  | "catActivityLevel"
+  | "catSpawnRatePerHour"
+  | "maxSpawnedCatsPerSession"
+  | "catCuddleLevel"
+  | "catNamingConvention";
+
+const CAT_TOPIA_HELP_COPY: Record<
+  CatTopiaHelpField,
+  {
+    title: string;
+    summary: string;
+    meanings: string[];
+    note?: string;
+  }
+> = {
+  mainCatName: {
+    title: "Main Animal Name",
+    summary: "This is Garfield's display name in the office.",
+    meanings: [
+      "Changing this renames your main cat in the UI.",
+      "Only affects the main cat, not already spawned cats.",
+      "Max 12 characters keeps the nameplate clean and readable.",
+    ],
+    note: "Tip: short names are easier to spot while zoomed out.",
+  },
+  enabledSpecies: {
+    title: "Enabled Animal Species",
+    summary: "Choose which species are allowed to spawn in Zoo-Topia.",
+    meanings: [
+      "Checked species can spawn over time.",
+      "Unchecked species will not spawn in new cycles.",
+      "Cats are enabled by default to preserve existing behavior.",
+    ],
+    note: "At least one species should stay enabled so the zoo can keep spawning.",
+  },
+  catVariety: {
+    title: "Animal Variety",
+    summary: "Controls how visually different newly spawned cats look.",
+    meanings: [
+      "Low: new cats look very similar to Garfield.",
+      "Medium: balanced mix of similar and different looks.",
+      "High: wider variety in coat patterns and eye color.",
+    ],
+    note: "This applies to newly spawned cats going forward.",
+  },
+  catActivityLevel: {
+    title: "Animal Activity Levels",
+    summary: "Controls movement speed for spawned cats (not Garfield).",
+    meanings: [
+      "Low: spawned cats move at 75% speed.",
+      "Medium: spawned cats move at normal speed.",
+      "High: spawned cats move at 150% speed.",
+    ],
+    note: "This updates existing spawned cats too.",
+  },
+  catSpawnRatePerHour: {
+    title: "New Animals Spawn Per Hour",
+    summary: "Controls how often new animals are created over time.",
+    meanings: [
+      "Range is 0 to 60 spawns per hour.",
+      "0 pauses new spawning.",
+      "Higher values increase office activity quickly.",
+    ],
+    note: "Changing this takes effect immediately for the next spawn timer.",
+  },
+  maxSpawnedCatsPerSession: {
+    title: "Total New Animals Per Session",
+    summary: "Sets the hard cap for how many new animals can spawn this session.",
+    meanings: [
+      "Range is 1 to 1000.",
+      "Lower value: colony stops growing sooner.",
+      "Higher value: colony can keep expanding longer.",
+    ],
+    note: "This updates instantly. If current count is already above cap, no new cats will spawn until count drops below the limit.",
+  },
+  catCuddleLevel: {
+    title: "Animal Cuddle Level",
+    summary: "Controls how closely cats and agents gather around each other.",
+    meanings: [
+      "CuddleCity: longer, closer hangouts.",
+      "Express Lane: quick interactions and faster spacing.",
+      "Anxious: brief clustering, then more spread out behavior.",
+      "Normal: default balanced social behavior.",
+    ],
+    note: "Useful when the office feels too crowded or too empty.",
+  },
+  catNamingConvention: {
+    title: "Animal Naming Convention",
+    summary: "Sets the style for names of newly spawned cats.",
+    meanings: [
+      "Examples: funny, silly, hilarious, wild, peace and love, punk rock.",
+      "You can type your own style label.",
+      "Name style is applied when each new cat is created.",
+    ],
+    note: "Max 20 characters keeps cat name chips readable.",
+  },
 };
 
 export function RetroOffice3D({
   agents,
   animationState = null,
+  onRemoveSyntheticCat,
+  zooRipPortraits = [],
+  catTopiaSettings = CAT_TOPIA_DEFAULT_SETTINGS,
+  onCatTopiaSettingsChange,
   deskAssignmentByDeskUid = {},
   cleaningCues = [],
+  catHoldByAgentId = {},
   deskHoldByAgentId = {},
   gymHoldByAgentId = {},
   githubReviewAgentId = null,
@@ -1880,7 +2775,7 @@ export function RetroOffice3D({
   monitorAgentId = null,
   monitorByAgentId = {},
   githubSkill = null,
-  officeTitle = "Luke Headquarters",
+  officeTitle = "CENTCOM HQ",
   officeTitleLoaded = false,
   voiceRepliesEnabled = false,
   voiceRepliesVoiceId = null,
@@ -1900,7 +2795,6 @@ export function RetroOffice3D({
   onStandupArrivalsChange,
   onStandupStartRequested,
   onMonitorSelect,
-  onAgentEdit,
   onDeskAssignmentChange,
   onDeskAssignmentsReset,
   onGithubReviewDismiss,
@@ -1909,11 +2803,13 @@ export function RetroOffice3D({
   onTextMessageComplete,
   onQaLabDismiss,
   onOpenGithubSkillSetup,
+  onAgentEdit,
 }: {
   agents: OfficeAgent[];
   animationState?: Pick<
     OfficeAnimationState,
     | "cleaningCues"
+    | "catHoldByAgentId"
     | "deskHoldByAgentId"
     | "githubHoldByAgentId"
     | "gymHoldByAgentId"
@@ -1921,8 +2817,13 @@ export function RetroOffice3D({
     | "smsBoothHoldByAgentId"
     | "qaHoldByAgentId"
   > | null;
+  onRemoveSyntheticCat?: (agentId: string) => void;
+  zooRipPortraits?: MemorialWallPortrait[];
+  catTopiaSettings?: CatTopiaSettings;
+  onCatTopiaSettingsChange?: (patch: Partial<CatTopiaSettings>) => void;
   deskAssignmentByDeskUid?: Record<string, string>;
   cleaningCues?: OfficeCleaningCue[];
+  catHoldByAgentId?: Record<string, boolean>;
   deskHoldByAgentId?: Record<string, boolean>;
   gymHoldByAgentId?: Record<string, boolean>;
   githubReviewAgentId?: string | null;
@@ -1963,7 +2864,6 @@ export function RetroOffice3D({
   onStandupArrivalsChange?: (arrivedAgentIds: string[]) => void;
   onStandupStartRequested?: () => void;
   onMonitorSelect?: (agentId: string | null) => void;
-  onAgentEdit?: (agentId: string) => void;
   onDeskAssignmentChange?: (deskUid: string, agentId: string | null) => void;
   onDeskAssignmentsReset?: (deskUids: string[]) => void;
   onGithubReviewDismiss?: () => void;
@@ -1976,8 +2876,25 @@ export function RetroOffice3D({
   onTextMessageComplete?: (agentId: string) => void;
   onQaLabDismiss?: () => void;
   onOpenGithubSkillSetup?: () => void;
+  onAgentEdit?: (agentId: string) => void;
 }) {
+  const resolvedCatTopiaSettings = useMemo(
+    () => normalizeCatTopiaSettings(catTopiaSettings),
+    [catTopiaSettings],
+  );
+  const catCuddleProfile = useMemo(
+    () => resolveCatCuddleProfile(resolvedCatTopiaSettings.catCuddleLevel),
+    [resolvedCatTopiaSettings.catCuddleLevel],
+  );
+  const catLoungeInteractionDistance =
+    GARFIELD_INTERACTION_DISTANCE * catCuddleProfile.interactionDistanceScale;
+  const catToCatMinDistance =
+    CAT_TO_CAT_MIN_DISTANCE * catCuddleProfile.catSpacingScale;
+  const catToHumanMinDistance =
+    CAT_TO_HUMAN_MIN_DISTANCE * catCuddleProfile.humanSpacingScale;
   const resolvedCleaningCues = animationState?.cleaningCues ?? cleaningCues;
+  const resolvedCatHoldByAgentId =
+    animationState?.catHoldByAgentId ?? catHoldByAgentId;
   const resolvedDeskHoldByAgentId =
     animationState?.deskHoldByAgentId ?? deskHoldByAgentId;
   const resolvedGymHoldByAgentId =
@@ -1991,30 +2908,23 @@ export function RetroOffice3D({
   const resolvedGithubReviewByAgentId =
     animationState?.githubHoldByAgentId ??
     (githubReviewAgentId ? { [githubReviewAgentId]: true } : {});
-  const [furniture, setFurniture] = useState<FurnitureItem[]>(() =>
-    ensureOfficeQaLab(
-      ensureOfficeGymRoom(
-        ensureOfficeServerRoom(
-          ensureOfficePhoneBooth(
-            ensureOfficeSmsBooth(
-            ensureOfficeAtm(
-              ensureOfficePingPongTable(
-                (loadFurniture() ?? materializeDefaults()).filter(
-                  (item) => !isRetiredPingPongLamp(item),
-                ),
-              ),
-            ),
-            ),
-          ),
-        ),
-      ),
-    ),
-  );
+  const initialFurnitureRef = useRef<FurnitureItem[] | null>(null);
+  if (initialFurnitureRef.current === null) {
+    initialFurnitureRef.current = buildInitialOfficeFurniture();
+  }
+  const [furniture, setFurniture] = useState<FurnitureItem[]>(() => [
+    ...(initialFurnitureRef.current ?? []),
+  ]);
   const [editMode, setEditMode] = useState(false);
   const [selectedUid, setSelectedUid] = useState<string | null>(null);
   const [hoverUid, setHoverUid] = useState<string | null>(null);
   const [drag, setDrag] = useState<DragState>({ kind: "idle" });
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [editDrawerTab, setEditDrawerTab] = useState<"objects" | "cat_topia">(
+    "objects",
+  );
+  const [catTopiaHelpField, setCatTopiaHelpField] =
+    useState<CatTopiaHelpField | null>(null);
   const [ghostPos, setGhostPos] = useState<[number, number, number] | null>(
     null,
   );
@@ -2025,7 +2935,6 @@ export function RetroOffice3D({
   const [spaceDown, setSpaceDown] = useState(false);
   const [spaceDragging, setSpaceDragging] = useState(false);
   const [standupBoardOpen, setStandupBoardOpen] = useState(false);
-  const [agentRosterOpen, setAgentRosterOpen] = useState(false);
   const autoOpenedStandupIdRef = useRef<string | null>(null);
   // Idea 1 (original): hovered agent for tooltip overlay.
   const [hoveredAgentId, setHoveredAgentId] = useState<string | null>(null);
@@ -2038,8 +2947,140 @@ export function RetroOffice3D({
     x: number;
     y: number;
   } | null>(null);
+  const [selectedCatChipId, setSelectedCatChipId] = useState<string | null>(null);
+  const [catChipStackOpen, setCatChipStackOpen] = useState(false);
+  const catChipStackRef = useRef<HTMLDivElement | null>(null);
   // New Idea 3: speech bubble agent IDs.
   const [speechAgentIds, setSpeechAgentIds] = useState<Set<string>>(new Set());
+  const [localSpeechByAgentId, setLocalSpeechByAgentId] = useState<
+    Record<string, string>
+  >({});
+  const [catCompanionTargetByAgentId, setCatCompanionTargetByAgentId] =
+    useState<Record<string, GarfieldCompanionTarget>>({});
+  const [catMovementPausedByAgentId, setCatMovementPausedByAgentId] = useState<
+    Record<string, boolean>
+  >({});
+  const catNextPerchMoveAtRef = useRef<Record<string, number>>({});
+  const catPerchKeyByAgentIdRef = useRef<Record<string, string>>({});
+  const catMeowBurstByAgentIdRef = useRef<
+    Record<string, GarfieldMeowBurstState | null>
+  >({});
+  const catNextMeowAtByAgentIdRef = useRef<Record<string, number>>({});
+  const catArrivalAnnouncedRef = useRef<Record<string, boolean>>({});
+  const catStallTrackerByAgentIdRef = useRef<
+    Record<string, { x: number; y: number; sinceMs: number }>
+  >({});
+  const animalProximitySinceByPairRef = useRef<Record<string, number>>({});
+  const animalPairCooldownUntilByPairRef = useRef<Record<string, number>>({});
+  const animalSeparationCooldownByAgentIdRef = useRef<Record<string, number>>({});
+  const localSpeechTimersRef = useRef<Record<string, number>>({});
+  const catCompanionIds = useMemo(
+    () =>
+      agents
+        .filter(
+          (agent) => agent.avatarKind === "cat" || agent.avatarKind === "animal",
+        )
+        .map((agent) => agent.id),
+    [agents],
+  );
+  useEffect(() => {
+    const targets = resolveGarfieldPerchTargets(furniture);
+    if (targets.length === 0) {
+      return;
+    }
+    const catIdSet = new Set(catCompanionIds);
+    for (const catId of catCompanionIds) {
+      if (!(catId in catPerchKeyByAgentIdRef.current)) {
+        catPerchKeyByAgentIdRef.current[catId] = "";
+      }
+      if (!(catId in catNextPerchMoveAtRef.current)) {
+        catNextPerchMoveAtRef.current[catId] = Date.now() + randomGarfieldIntervalMs();
+      }
+      if (!(catId in catNextMeowAtByAgentIdRef.current)) {
+        catNextMeowAtByAgentIdRef.current[catId] =
+          Date.now() + randomGarfieldSittingMeowIntervalMs();
+      }
+      if (!(catId in catMeowBurstByAgentIdRef.current)) {
+        catMeowBurstByAgentIdRef.current[catId] = null;
+      }
+      if (!(catId in catStallTrackerByAgentIdRef.current)) {
+        catStallTrackerByAgentIdRef.current[catId] = {
+          x: GARFIELD_HOME_TARGET.x,
+          y: GARFIELD_HOME_TARGET.y,
+          sinceMs: Date.now(),
+        };
+      }
+    }
+    for (const key of Object.keys(catPerchKeyByAgentIdRef.current)) {
+      if (!catIdSet.has(key)) delete catPerchKeyByAgentIdRef.current[key];
+    }
+    for (const key of Object.keys(catNextPerchMoveAtRef.current)) {
+      if (!catIdSet.has(key)) delete catNextPerchMoveAtRef.current[key];
+    }
+    for (const key of Object.keys(catNextMeowAtByAgentIdRef.current)) {
+      if (!catIdSet.has(key)) delete catNextMeowAtByAgentIdRef.current[key];
+    }
+    for (const key of Object.keys(catMeowBurstByAgentIdRef.current)) {
+      if (!catIdSet.has(key)) delete catMeowBurstByAgentIdRef.current[key];
+    }
+    for (const key of Object.keys(catStallTrackerByAgentIdRef.current)) {
+      if (!catIdSet.has(key)) delete catStallTrackerByAgentIdRef.current[key];
+    }
+    setCatCompanionTargetByAgentId((previous) => {
+      const next: Record<string, GarfieldCompanionTarget> = {};
+      for (const catId of catCompanionIds) {
+        const existing = previous[catId];
+        if (existing) {
+          next[catId] = existing;
+          continue;
+        }
+        const randomTarget =
+          targets[Math.floor(Math.random() * targets.length)] ?? GARFIELD_HOME_ROUTE;
+        next[catId] = randomTarget;
+        catPerchKeyByAgentIdRef.current[catId] = randomTarget.key;
+      }
+      return next;
+    });
+  }, [catCompanionIds, furniture]);
+  useEffect(() => {
+    const catIdSet = new Set(catCompanionIds);
+    for (const visitorKey of Object.keys(catArrivalAnnouncedRef.current)) {
+      const [visitorId, catId] = visitorKey.split("::");
+      if (!visitorId || !catId || !catIdSet.has(catId)) {
+        delete catArrivalAnnouncedRef.current[visitorKey];
+      }
+    }
+  }, [catCompanionIds]);
+  const queueLocalSpeech = useCallback(
+    (agentId: string, text: string, durationMs = 7_500) => {
+      const normalized = text.trim();
+      if (!agentId || !normalized) return;
+      const existingTimer = localSpeechTimersRef.current[agentId];
+      if (typeof existingTimer === "number") {
+        window.clearTimeout(existingTimer);
+      }
+      setLocalSpeechByAgentId((previous) => ({
+        ...previous,
+        [agentId]: normalized,
+      }));
+      setSpeechAgentIds((previous) => new Set([...previous, agentId]));
+      const timerId = window.setTimeout(() => {
+        setLocalSpeechByAgentId((previous) => {
+          const next = { ...previous };
+          delete next[agentId];
+          return next;
+        });
+        setSpeechAgentIds((previous) => {
+          const next = new Set(previous);
+          next.delete(agentId);
+          return next;
+        });
+        delete localSpeechTimersRef.current[agentId];
+      }, durationMs);
+      localSpeechTimersRef.current[agentId] = timerId;
+    },
+    [],
+  );
   const statusFeedEvents = useMemo(
     () => feedEvents.filter((event) => event.kind !== "reply"),
     [feedEvents],
@@ -2051,7 +3092,9 @@ export function RetroOffice3D({
       const text = event.text.trim();
       if (event.kind !== "reply" || !text || texts[event.id]) continue;
       const { cleanText, imageUrl } = extractSpeechImage(text, event.id);
-      texts[event.id] = cleanText;
+      const speechText = clampOverlayText(cleanText, SPEECH_BUBBLE_TEXT_MAX_CHARS);
+      if (!speechText) continue;
+      texts[event.id] = speechText;
       if (imageUrl) images[event.id] = imageUrl;
     }
     return { speechTextByAgentId: texts, speechImageUrlByAgentId: images };
@@ -2133,8 +3176,6 @@ export function RetroOffice3D({
   const phoneBoothAgentIdRef = useRef<string | null>(null);
   const onPhoneCallSpeakRef = useRef(onPhoneCallSpeak);
   const onPhoneCallCompleteRef = useRef(onPhoneCallComplete);
-  const onStandupArrivalsChangeRef = useRef(onStandupArrivalsChange);
-  const lastStandupArrivalKeyRef = useRef<string | null>(null);
   const effectiveSmsBoothAgentIdRef = useRef<string | null>(null);
   const effectiveTextMessageScenarioRef = useRef<MockTextMessageScenario | null>(null);
   const smsBoothAgentIdRef = useRef<string | null>(null);
@@ -2175,6 +3216,12 @@ export function RetroOffice3D({
   useEffect(() => {
     followAgentIdRef.current = followAgentId;
   }, [followAgentId]);
+
+  useEffect(() => {
+    if (!editMode) {
+      setCatTopiaHelpField(null);
+    }
+  }, [editMode]);
 
   // Derive per-agent colors from the agents prop (stable, no state needed).
   const agentColorMap = useMemo(
@@ -2223,10 +3270,7 @@ export function RetroOffice3D({
   useEffect(() => {
     const intervalId = window.setInterval(() => {
       const now = Date.now();
-      setJanitorActors((previous) => {
-        const next = pruneExpiredJanitorActors(previous, now);
-        return next.length === previous.length ? previous : next;
-      });
+      setJanitorActors((previous) => pruneExpiredJanitorActors(previous, now));
     }, 1000);
     return () => {
       window.clearInterval(intervalId);
@@ -2275,11 +3319,15 @@ export function RetroOffice3D({
     lastSeenByAgentId,
     resolvedDeskHoldByAgentId,
     resolvedGymHoldByAgentId,
+    resolvedCatHoldByAgentId,
     resolvedSmsBoothHoldByAgentId,
     resolvedPhoneBoothHoldByAgentId,
     resolvedQaHoldByAgentId,
     resolvedGithubReviewByAgentId,
+    catCompanionTargetByAgentId,
+    catMovementPausedByAgentId,
     standupMeeting,
+    resolvedCatTopiaSettings.catCuddleLevel,
     );
   useEffect(() => {
     const syncRenderAgentUi = () => {
@@ -2317,6 +3365,56 @@ export function RetroOffice3D({
       }, {}),
     [agents, renderAgentUiById],
   );
+  const catAgents = useMemo(
+    () =>
+      agents.filter(
+        (agent) => agent.avatarKind === "cat" || agent.avatarKind === "animal",
+      ),
+    [agents],
+  );
+  const nonCatAgents = useMemo(
+    () => agents.filter((agent) => agent.avatarKind === "human"),
+    [agents],
+  );
+  const selectedCatChipAgent = useMemo(
+    () =>
+      catAgents.find((agent) => agent.id === selectedCatChipId) ??
+      catAgents[0] ??
+      null,
+    [catAgents, selectedCatChipId],
+  );
+  const topBarAgents = useMemo(() => {
+    if (!selectedCatChipAgent) return nonCatAgents;
+    return [...nonCatAgents, selectedCatChipAgent];
+  }, [nonCatAgents, selectedCatChipAgent]);
+  useEffect(() => {
+    if (catAgents.length === 0) {
+      if (selectedCatChipId !== null) {
+        setSelectedCatChipId(null);
+      }
+      if (catChipStackOpen) {
+        setCatChipStackOpen(false);
+      }
+      return;
+    }
+    if (
+      !selectedCatChipId ||
+      !catAgents.some((agent) => agent.id === selectedCatChipId)
+    ) {
+      setSelectedCatChipId(catAgents[0]?.id ?? null);
+    }
+  }, [catAgents, selectedCatChipId, catChipStackOpen]);
+  useEffect(() => {
+    if (!catChipStackOpen) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      if (catChipStackRef.current?.contains(event.target as Node)) return;
+      setCatChipStackOpen(false);
+    };
+    window.addEventListener("pointerdown", handlePointerDown);
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown);
+    };
+  }, [catChipStackOpen]);
   const hoveredAgent = useMemo(
     () => (hoveredAgentId ? agents.find((agent) => agent.id === hoveredAgentId) ?? null : null),
     [agents, hoveredAgentId],
@@ -2328,13 +3426,56 @@ export function RetroOffice3D({
   const handleAgentUnhover = useCallback(() => {
     setHoveredAgentId(null);
   }, []);
-  const handleAgentClick = useCallback((agentId: string) => {
-    const agent = renderAgentLookupRef.current.get(agentId);
-    if (!agent || !orbitRef.current) return;
-    const [wx, , wz] = toWorld(agent.x, agent.y);
-    orbitRef.current.target.set(wx, 0, wz);
-    orbitRef.current.update();
-  }, [renderAgentLookupRef]);
+  const handleAgentClick = useCallback(
+    (agentId: string) => {
+      const agent = renderAgentLookupRef.current.get(agentId);
+      if (!agent) return;
+      const isCatCompanion =
+        "avatarKind" in agent &&
+        (agent.avatarKind === "cat" || agent.avatarKind === "animal");
+      if (isCatCompanion) {
+        queueLocalSpeech(
+          agentId,
+          pickRandomLine(GARFIELD_PET_LINES, "purr..."),
+          6_800,
+        );
+        const activeVisitorId =
+          Object.entries(resolvedCatHoldByAgentId).find(
+            ([candidateId, held]) =>
+              held &&
+              candidateId !== agentId &&
+              agents.some((candidate) => candidate.id === candidateId),
+          )?.[0] ?? null;
+        if (activeVisitorId) {
+          queueLocalSpeech(
+            activeVisitorId,
+            pickRandomLine(
+              GARFIELD_PET_AGENT_LINES,
+              "That was a great morale break.",
+            ),
+            6_500,
+          );
+        }
+        setMoodByAgentId((previous) => ({
+          ...previous,
+          [agentId]: { emoji: "😺", ts: Date.now() },
+          ...(activeVisitorId
+            ? { [activeVisitorId]: { emoji: "😄", ts: Date.now() } }
+            : {}),
+        }));
+      }
+      if (!orbitRef.current) return;
+      const [wx, , wz] = toWorld(agent.x, agent.y);
+      orbitRef.current.target.set(wx, 0, wz);
+      orbitRef.current.update();
+    },
+    [
+      agents,
+      queueLocalSpeech,
+      renderAgentLookupRef,
+      resolvedCatHoldByAgentId,
+    ],
+  );
   const handleAgentContextMenu = useCallback((agentId: string, x: number, y: number) => {
     setContextMenu({ id: agentId, x, y });
   }, []);
@@ -2472,11 +3613,6 @@ export function RetroOffice3D({
     githubImmersive ||
     qaImmersive ||
     standupImmersive;
-  const compactRosterAgents = useMemo(
-    () => agents.slice(0, COMPACT_AGENT_BADGE_LIMIT),
-    [agents],
-  );
-  const hiddenAgentCount = Math.max(0, agents.length - compactRosterAgents.length);
   const standupActive =
     standupMeeting?.phase === "gathering" ||
     standupMeeting?.phase === "in_progress";
@@ -2495,10 +3631,6 @@ export function RetroOffice3D({
       ) ?? null
     );
   }, [assignedDeskIndexByAgentId, deskLocations, furniture, monitorAgentId]);
-  useEffect(() => {
-    if (!immersiveOverlayActive) return;
-    setAgentRosterOpen(false);
-  }, [immersiveOverlayActive]);
   const selectedItem = useMemo(
     () => furniture.find((item) => item._uid === selectedUid) ?? null,
     [furniture, selectedUid],
@@ -2595,7 +3727,6 @@ export function RetroOffice3D({
     phoneBoothAgentIdRef.current = phoneBoothAgentId;
     onPhoneCallSpeakRef.current = onPhoneCallSpeak;
     onPhoneCallCompleteRef.current = onPhoneCallComplete;
-    onStandupArrivalsChangeRef.current = onStandupArrivalsChange;
   }, [
     effectiveSmsBoothAgentId,
     effectiveTextMessageScenario,
@@ -2605,7 +3736,6 @@ export function RetroOffice3D({
     effectivePhoneCallScenario,
     onPhoneCallComplete,
     onPhoneCallSpeak,
-    onStandupArrivalsChange,
     phoneBoothAgentId,
   ]);
 
@@ -3015,10 +4145,7 @@ export function RetroOffice3D({
       }
 
       if (!standupActive || !standupMeeting) {
-        const nextArrivalsKey = "";
-        if (lastStandupArrivalKeyRef.current === nextArrivalsKey) return;
-        lastStandupArrivalKeyRef.current = nextArrivalsKey;
-        onStandupArrivalsChangeRef.current?.([]);
+        onStandupArrivalsChange?.([]);
         return;
       }
 
@@ -3027,10 +4154,7 @@ export function RetroOffice3D({
         if (!agent || agent.interactionTarget !== "meeting_room") return false;
         return Math.hypot(agent.x - agent.targetX, agent.y - agent.targetY) < 18;
       });
-      const nextArrivalsKey = arrivedParticipants.join("|");
-      if (lastStandupArrivalKeyRef.current === nextArrivalsKey) return;
-      lastStandupArrivalKeyRef.current = nextArrivalsKey;
-      onStandupArrivalsChangeRef.current?.(arrivedParticipants);
+      onStandupArrivalsChange?.(arrivedParticipants);
     };
 
     syncArrivalState();
@@ -3042,6 +4166,7 @@ export function RetroOffice3D({
     githubReviewAgentId,
     manualSmsBoothOpen,
     manualPhoneBoothOpen,
+    onStandupArrivalsChange,
     phoneBoothAgentId,
     qaTestingAgentId,
     renderAgentLookupRef,
@@ -4286,15 +5411,28 @@ export function RetroOffice3D({
     return () => window.removeEventListener("pointerdown", dismiss);
   }, [contextMenu]);
 
+  useEffect(
+    () => () => {
+      for (const timerId of Object.values(localSpeechTimersRef.current)) {
+        window.clearTimeout(timerId);
+      }
+      localSpeechTimersRef.current = {};
+    },
+    [],
+  );
+
   // New Idea 3: show speech bubble based on reply length.
   useEffect(() => {
     if (feedEvents.length === 0) return;
     const latest = feedEvents[0];
     if (!latest) return;
     if (latest.kind !== "reply") return;
+    const { cleanText } = extractSpeechImage(latest.text.trim(), latest.id);
+    const speechText = clampOverlayText(cleanText, SPEECH_BUBBLE_TEXT_MAX_CHARS);
+    if (!speechText) return;
     const speechBubbleDurationMs = Math.min(
       12_000,
-      Math.max(5_500, 2_500 + latest.text.trim().length * 42),
+      Math.max(5_500, 2_500 + speechText.length * 42),
     );
     const addTimer = window.setTimeout(() => {
       setSpeechAgentIds((prev) => new Set([...prev, latest.id]));
@@ -4311,6 +5449,510 @@ export function RetroOffice3D({
       window.clearTimeout(timer);
     };
   }, [feedEvents]);
+
+  useEffect(() => {
+    const tickCatBehavior = () => {
+      const now = Date.now();
+      const lookup = renderAgentLookupRef.current;
+      const catActors = catCompanionIds
+        .map((catId) => lookup.get(catId))
+        .filter((candidate): candidate is RenderAgent => Boolean(candidate));
+
+      if (catActors.length === 0) {
+        catArrivalAnnouncedRef.current = {};
+        catStallTrackerByAgentIdRef.current = {};
+        animalProximitySinceByPairRef.current = {};
+        animalPairCooldownUntilByPairRef.current = {};
+        animalSeparationCooldownByAgentIdRef.current = {};
+        setCatMovementPausedByAgentId((previous) =>
+          Object.keys(previous).length > 0 ? {} : previous,
+        );
+        setCatCompanionTargetByAgentId((previous) =>
+          Object.keys(previous).length > 0 ? {} : previous,
+        );
+        return;
+      }
+
+      const activeCatIdSet = new Set(catActors.map((cat) => cat.id));
+      const activeCatHoldAgentIds = Object.entries(resolvedCatHoldByAgentId)
+        .filter(
+          ([agentId, held]) =>
+            held &&
+            !catCompanionIds.includes(agentId) &&
+            agents.some((candidate) => candidate.id === agentId),
+        )
+        .map(([agentId]) => agentId);
+
+      const visitorToCatId: Record<string, string> = {};
+      const pausedByAgentId: Record<string, boolean> = {};
+      for (const visitorId of activeCatHoldAgentIds) {
+        const visitor = lookup.get(visitorId);
+        if (!visitor) continue;
+        let nearestCat = catActors[0];
+        let nearestDistance = Math.hypot(
+          nearestCat.x - visitor.x,
+          nearestCat.y - visitor.y,
+        );
+        for (const catActor of catActors) {
+          const distance = Math.hypot(
+            catActor.x - visitor.x,
+            catActor.y - visitor.y,
+          );
+          if (distance < nearestDistance) {
+            nearestDistance = distance;
+            nearestCat = catActor;
+          }
+        }
+        visitorToCatId[visitorId] = nearestCat.id;
+        pausedByAgentId[nearestCat.id] = true;
+      }
+
+      const activePairKeys = new Set(
+        Object.entries(visitorToCatId).map(
+          ([visitorId, catId]) => `${visitorId}::${catId}`,
+        ),
+      );
+      for (const knownPairKey of Object.keys(catArrivalAnnouncedRef.current)) {
+        if (!activePairKeys.has(knownPairKey)) {
+          delete catArrivalAnnouncedRef.current[knownPairKey];
+        }
+      }
+
+      for (const [visitorId, catId] of Object.entries(visitorToCatId)) {
+        const visitor = lookup.get(visitorId);
+        const cat = lookup.get(catId);
+        if (!visitor || !cat) continue;
+        const distance = Math.hypot(cat.x - visitor.x, cat.y - visitor.y);
+        const hasArrived =
+          distance <= catLoungeInteractionDistance + 6 &&
+          visitor.interactionTarget === "cat_lounge";
+        if (hasArrived) {
+          pausedByAgentId[visitorId] = true;
+          pausedByAgentId[catId] = true;
+        }
+        const pairKey = `${visitorId}::${catId}`;
+        if (!hasArrived || catArrivalAnnouncedRef.current[pairKey]) continue;
+        catArrivalAnnouncedRef.current[pairKey] = true;
+        queueLocalSpeech(
+          catId,
+          pickRandomLine(GARFIELD_PET_LINES, "purr... purr..."),
+          7_000,
+        );
+        queueLocalSpeech(
+          visitorId,
+          pickRandomLine(
+            GARFIELD_PET_AGENT_LINES,
+            "That was a great morale break.",
+          ),
+          6_500,
+        );
+        setMoodByAgentId((previous) => ({
+          ...previous,
+          [catId]: { emoji: "😸", ts: now },
+          [visitorId]: { emoji: "🙂", ts: now },
+        }));
+      }
+
+      const perchTargets = resolveGarfieldPerchTargets(furnitureRef.current ?? []);
+      const navGrid = buildNavGrid(furnitureRef.current ?? []);
+      const hasReasonableRoute = (
+        fromX: number,
+        fromY: number,
+        target: GarfieldCompanionTarget,
+      ): boolean => {
+        const path = astar(fromX, fromY, target.approachX, target.approachY, navGrid);
+        if (path.length > 1) return true;
+        const directDistance = Math.hypot(
+          fromX - target.approachX,
+          fromY - target.approachY,
+        );
+        return directDistance <= AGENT_RADIUS * 2.5;
+      };
+      let targetMapChanged = false;
+      const nextTargetByCatId = { ...catCompanionTargetByAgentId };
+      const proximityPausedCatByAgentId: Record<string, boolean> = {};
+      const observedProximityPairKeys = new Set<string>();
+      for (const knownCatId of Object.keys(nextTargetByCatId)) {
+        if (!activeCatIdSet.has(knownCatId)) {
+          delete nextTargetByCatId[knownCatId];
+          targetMapChanged = true;
+        }
+      }
+
+      for (const cat of catActors) {
+        const catId = cat.id;
+        const activityMultiplier = Math.max(
+          0.5,
+          Math.min(
+            1.5,
+            ("activityMultiplier" in cat
+              ? cat.activityMultiplier
+              : undefined) ?? 1,
+          ),
+        );
+        const scheduleDelay = (baseMs: number): number =>
+          Math.max(3_000, Math.round(baseMs / activityMultiplier));
+
+        const isBeingPet = Boolean(pausedByAgentId[catId]);
+        const previousStall = catStallTrackerByAgentIdRef.current[catId];
+        if (!previousStall) {
+          catStallTrackerByAgentIdRef.current[catId] = {
+            x: cat.x,
+            y: cat.y,
+            sinceMs: now,
+          };
+        } else {
+          const movedDistance = Math.hypot(
+            cat.x - previousStall.x,
+            cat.y - previousStall.y,
+          );
+          if (movedDistance >= CAT_STALL_DISTANCE_THRESHOLD || cat.state !== "walking") {
+            catStallTrackerByAgentIdRef.current[catId] = {
+              x: cat.x,
+              y: cat.y,
+              sinceMs: now,
+            };
+          }
+        }
+        const canMeow = cat.state === "sitting" || isBeingPet;
+        if (!canMeow) {
+          catMeowBurstByAgentIdRef.current[catId] = null;
+          catNextMeowAtByAgentIdRef.current[catId] =
+            now + scheduleDelay(randomGarfieldSittingMeowIntervalMs());
+        } else {
+          const nextMeowAt = catNextMeowAtByAgentIdRef.current[catId] ?? 0;
+          if (!catMeowBurstByAgentIdRef.current[catId] && now >= nextMeowAt) {
+            catMeowBurstByAgentIdRef.current[catId] = {
+              remaining: randomGarfieldMeowBurstCount(),
+              nextAt: now,
+            };
+          }
+          const burst = catMeowBurstByAgentIdRef.current[catId];
+          if (burst && now >= burst.nextAt) {
+            queueLocalSpeech(
+              catId,
+              pickRandomLine(GARFIELD_MEOW_LINES, "meow"),
+              1_600,
+            );
+            setMoodByAgentId((previous) => ({
+              ...previous,
+              [catId]: { emoji: "😺", ts: now },
+            }));
+            burst.remaining -= 1;
+            if (burst.remaining > 0) {
+              burst.nextAt = now + randomGarfieldMeowPauseMs();
+            } else {
+              catMeowBurstByAgentIdRef.current[catId] = null;
+              catNextMeowAtByAgentIdRef.current[catId] =
+                now +
+                scheduleDelay(
+                  isBeingPet
+                    ? randomGarfieldPettingMeowIntervalMs()
+                    : randomGarfieldSittingMeowIntervalMs(),
+                );
+            }
+          }
+        }
+
+        if (isBeingPet) {
+          continue;
+        }
+
+        const separationCooldownUntil =
+          animalSeparationCooldownByAgentIdRef.current[catId] ?? 0;
+        const nearestNeighbor = [...lookup.values()].reduce(
+          (best, candidate) => {
+            if (candidate.id === catId) return best;
+            if ("role" in candidate && candidate.role === "janitor") return best;
+            const distance = Math.hypot(candidate.x - cat.x, candidate.y - cat.y);
+            if (!best || distance < best.distance) {
+              return { actor: candidate, distance };
+            }
+            return best;
+          },
+          null as { actor: RenderAgent; distance: number } | null,
+        );
+        if (nearestNeighbor) {
+          const neighborIsAnimal = isAnimalActor(nearestNeighbor.actor);
+          const neighborId = nearestNeighbor.actor.id;
+          const proximityDistanceLimit = neighborIsAnimal
+            ? catToCatMinDistance * 1.15
+            : catToHumanMinDistance * 1.1;
+          if (nearestNeighbor.distance <= proximityDistanceLimit) {
+            const pairKey = [catId, neighborId].sort().join("::");
+            observedProximityPairKeys.add(pairKey);
+            const proximitySince =
+              animalProximitySinceByPairRef.current[pairKey] ?? now;
+            animalProximitySinceByPairRef.current[pairKey] = proximitySince;
+            const proximityDurationMs = now - proximitySince;
+            const pairCooldownUntil =
+              animalPairCooldownUntilByPairRef.current[pairKey] ?? 0;
+            const shouldForceSeparate =
+              pairCooldownUntil > now ||
+              proximityDurationMs >= ANIMAL_PROXIMITY_FORCE_SEPARATE_AFTER_MS;
+            if (
+              shouldForceSeparate &&
+              separationCooldownUntil <= now
+            ) {
+              let offsetX = cat.x - nearestNeighbor.actor.x;
+              let offsetY = cat.y - nearestNeighbor.actor.y;
+              if (Math.hypot(offsetX, offsetY) < 0.001) {
+                offsetX = Math.random() - 0.5;
+                offsetY = Math.random() - 0.5;
+              }
+              const offsetNorm = Math.hypot(offsetX, offsetY) || 1;
+              const splitTarget = clampCanvasPoint(
+                cat.x + (offsetX / offsetNorm) * ANIMAL_FORCE_APART_DISTANCE,
+                cat.y + (offsetY / offsetNorm) * ANIMAL_FORCE_APART_DISTANCE,
+              );
+              const splitRouteTarget = buildFloorCatRouteTarget(
+                `fallback:split:${catId}:${nearestNeighbor.actor.id}:${Math.floor(now / 1_000)}`,
+                splitTarget.x,
+                splitTarget.y,
+                resolveFacingTowards(cat.x, cat.y, splitTarget.x, splitTarget.y),
+              );
+              nextTargetByCatId[catId] = splitRouteTarget;
+              catPerchKeyByAgentIdRef.current[catId] = splitRouteTarget.key;
+              catNextPerchMoveAtRef.current[catId] =
+                now + scheduleDelay(randomGarfieldIntervalMs());
+              animalSeparationCooldownByAgentIdRef.current[catId] =
+                now + ANIMAL_SEPARATION_COOLDOWN_MS;
+              if (neighborIsAnimal && activeCatIdSet.has(neighborId)) {
+                const oppositeSplitTarget = clampCanvasPoint(
+                  nearestNeighbor.actor.x -
+                    (offsetX / offsetNorm) * ANIMAL_FORCE_APART_DISTANCE,
+                  nearestNeighbor.actor.y -
+                    (offsetY / offsetNorm) * ANIMAL_FORCE_APART_DISTANCE,
+                );
+                const oppositeSplitRouteTarget = buildFloorCatRouteTarget(
+                  `fallback:split:${neighborId}:${catId}:${Math.floor(now / 1_000)}`,
+                  oppositeSplitTarget.x,
+                  oppositeSplitTarget.y,
+                  resolveFacingTowards(
+                    nearestNeighbor.actor.x,
+                    nearestNeighbor.actor.y,
+                    oppositeSplitTarget.x,
+                    oppositeSplitTarget.y,
+                  ),
+                );
+                nextTargetByCatId[neighborId] = oppositeSplitRouteTarget;
+                catPerchKeyByAgentIdRef.current[neighborId] =
+                  oppositeSplitRouteTarget.key;
+                catNextPerchMoveAtRef.current[neighborId] =
+                  now + scheduleDelay(randomGarfieldIntervalMs());
+                animalSeparationCooldownByAgentIdRef.current[neighborId] =
+                  now + ANIMAL_SEPARATION_COOLDOWN_MS;
+              }
+              animalPairCooldownUntilByPairRef.current[pairKey] =
+                now + ANIMAL_PAIR_PROXIMITY_COOLDOWN_MS;
+              delete animalProximitySinceByPairRef.current[pairKey];
+              targetMapChanged = true;
+              continue;
+            }
+            if (proximityDurationMs >= ANIMAL_PROXIMITY_STILL_AFTER_MS) {
+              proximityPausedCatByAgentId[catId] = true;
+              if (neighborIsAnimal && activeCatIdSet.has(neighborId)) {
+                proximityPausedCatByAgentId[neighborId] = true;
+              }
+            }
+          }
+        }
+
+        const stallTracker = catStallTrackerByAgentIdRef.current[catId];
+        if (stallTracker && now - stallTracker.sinceMs >= CAT_STALL_TIMEOUT_MS) {
+          const cuddleCandidates = [...lookup.values()].filter((candidate) => {
+            if (candidate.id === catId) return false;
+            if ("role" in candidate && candidate.role === "janitor") return false;
+            return true;
+          });
+          let fallbackTarget: GarfieldCompanionTarget | null = null;
+          if (cuddleCandidates.length > 0) {
+            const nearest = cuddleCandidates.reduce((best, candidate) => {
+              const candidateDistance = Math.hypot(
+                candidate.x - cat.x,
+                candidate.y - cat.y,
+              );
+              if (!best || candidateDistance < best.distance) {
+                return {
+                  actor: candidate,
+                  distance: candidateDistance,
+                };
+              }
+              return best;
+            }, null as { actor: RenderAgent; distance: number } | null);
+            if (nearest) {
+              const cuddleRoute = resolveCatLoungeTarget(catId, {
+                targetX: nearest.actor.x,
+                targetY: nearest.actor.y,
+              }, catLoungeInteractionDistance);
+              fallbackTarget = buildFloorCatRouteTarget(
+                `fallback:cuddle:${nearest.actor.id}:${Math.floor(now / 1_000)}`,
+                cuddleRoute.targetX,
+                cuddleRoute.targetY,
+                cuddleRoute.facing,
+              );
+            }
+          }
+          if (!fallbackTarget) {
+            const roamTarget =
+              ROAM_POINTS[Math.floor(Math.random() * ROAM_POINTS.length)] ??
+              GARFIELD_HOME_TARGET;
+            fallbackTarget = buildFloorCatRouteTarget(
+              `fallback:roam:${catId}:${Math.floor(now / 1_000)}`,
+              roamTarget.x,
+              roamTarget.y,
+              resolveFacingTowards(
+                roamTarget.x,
+                roamTarget.y,
+                GARFIELD_HOME_TARGET.x,
+                GARFIELD_HOME_TARGET.y,
+              ),
+            );
+          }
+          nextTargetByCatId[catId] = fallbackTarget;
+          catPerchKeyByAgentIdRef.current[catId] = fallbackTarget.key;
+          catNextPerchMoveAtRef.current[catId] =
+            now + scheduleDelay(randomGarfieldIntervalMs());
+          catStallTrackerByAgentIdRef.current[catId] = {
+            x: cat.x,
+            y: cat.y,
+            sinceMs: now,
+          };
+          targetMapChanged = true;
+          continue;
+        }
+
+        const nextPerchMoveAt = catNextPerchMoveAtRef.current[catId] ?? 0;
+        if (now < nextPerchMoveAt) {
+          continue;
+        }
+        if (perchTargets.length === 0) {
+          catNextPerchMoveAtRef.current[catId] =
+            now + scheduleDelay(randomGarfieldIntervalMs());
+          continue;
+        }
+        const previousPerchKey = catPerchKeyByAgentIdRef.current[catId] ?? "";
+        const occupiedByOtherCats = new Set(
+          Object.entries(nextTargetByCatId)
+            .filter(
+              ([otherCatId, target]) =>
+                otherCatId !== catId &&
+                activeCatIdSet.has(otherCatId) &&
+                Boolean(target?.key),
+            )
+            .map(([, target]) => target.key),
+        );
+        const nonPreviousTargets = perchTargets.filter(
+          (target) => target.key !== previousPerchKey,
+        );
+        const unoccupiedTargets = nonPreviousTargets.filter(
+          (target) => !occupiedByOtherCats.has(target.key),
+        );
+        const baseTargetPool =
+          unoccupiedTargets.length > 0
+            ? unoccupiedTargets
+            : nonPreviousTargets.length > 0
+              ? nonPreviousTargets
+              : perchTargets;
+        const baseTarget =
+          baseTargetPool[Math.floor(Math.random() * baseTargetPool.length)] ?? null;
+        let nextTarget: GarfieldCompanionTarget | null = baseTarget;
+        if (baseTarget && occupiedByOtherCats.has(baseTarget.key)) {
+          nextTarget = buildCuddleVariantTarget(baseTarget, catId);
+        }
+        if (nextTarget && !hasReasonableRoute(cat.x, cat.y, nextTarget)) {
+          const roamTarget =
+            ROAM_POINTS[Math.floor(Math.random() * ROAM_POINTS.length)] ??
+            GARFIELD_HOME_TARGET;
+          nextTarget = buildFloorCatRouteTarget(
+            `fallback:route:${catId}:${Math.floor(now / 1_000)}`,
+            roamTarget.x,
+            roamTarget.y,
+            resolveFacingTowards(
+              roamTarget.x,
+              roamTarget.y,
+              GARFIELD_HOME_TARGET.x,
+              GARFIELD_HOME_TARGET.y,
+            ),
+          );
+        }
+        if (!nextTarget) {
+          catNextPerchMoveAtRef.current[catId] =
+            now + scheduleDelay(randomGarfieldIntervalMs());
+          continue;
+        }
+        catPerchKeyByAgentIdRef.current[catId] = nextTarget.key;
+        catNextPerchMoveAtRef.current[catId] =
+          now + scheduleDelay(randomGarfieldIntervalMs());
+        const previousTarget = nextTargetByCatId[catId];
+        if (!previousTarget || previousTarget.key !== nextTarget.key) {
+          nextTargetByCatId[catId] = nextTarget;
+          targetMapChanged = true;
+        }
+      }
+
+      for (const pairKey of Object.keys(animalProximitySinceByPairRef.current)) {
+        if (!observedProximityPairKeys.has(pairKey)) {
+          delete animalProximitySinceByPairRef.current[pairKey];
+        }
+      }
+      for (const catId of Object.keys(animalSeparationCooldownByAgentIdRef.current)) {
+        if (!activeCatIdSet.has(catId)) {
+          delete animalSeparationCooldownByAgentIdRef.current[catId];
+        }
+      }
+      for (const pairKey of Object.keys(animalPairCooldownUntilByPairRef.current)) {
+        const cooldownUntil = animalPairCooldownUntilByPairRef.current[pairKey] ?? 0;
+        const [leftId, rightId] = pairKey.split("::");
+        const hasActiveAnimalSide =
+          activeCatIdSet.has(leftId) || activeCatIdSet.has(rightId);
+        const hasKnownActorSide = lookup.has(leftId) || lookup.has(rightId);
+        if (cooldownUntil <= now || !hasActiveAnimalSide || !hasKnownActorSide) {
+          delete animalPairCooldownUntilByPairRef.current[pairKey];
+        }
+      }
+
+      const nextPausedByCatId: Record<string, boolean> = {};
+      for (const catId of activeCatIdSet) {
+        if (pausedByAgentId[catId] || proximityPausedCatByAgentId[catId]) {
+          nextPausedByCatId[catId] = true;
+        }
+      }
+      setCatMovementPausedByAgentId((previous) => {
+        const previousKeys = Object.keys(previous);
+        const nextKeys = Object.keys(nextPausedByCatId);
+        if (previousKeys.length !== nextKeys.length) {
+          return nextPausedByCatId;
+        }
+        for (const key of previousKeys) {
+          if (Boolean(previous[key]) !== Boolean(nextPausedByCatId[key])) {
+            return nextPausedByCatId;
+          }
+        }
+        return previous;
+      });
+
+      if (targetMapChanged) {
+        setCatCompanionTargetByAgentId(nextTargetByCatId);
+      }
+    };
+
+    tickCatBehavior();
+    const intervalId = window.setInterval(tickCatBehavior, 600);
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [
+    agents,
+    catCompanionIds,
+    catCompanionTargetByAgentId,
+    catLoungeInteractionDistance,
+    catToCatMinDistance,
+    catToHumanMinDistance,
+    queueLocalSpeech,
+    renderAgentLookupRef,
+    resolvedCatHoldByAgentId,
+  ]);
 
   // E3 Idea 1: emoji mood reactions on feed events.
   useEffect(() => {
@@ -4447,6 +6089,7 @@ export function RetroOffice3D({
 
           {/* Wall pictures — procedural, no async loading. */}
           <SceneWallPictures />
+          <SceneMemorialWallPictures portraits={zooRipPortraits} />
 
           {/* Environment lighting — async, wrapped in its own Suspense so floor stays visible. */}
           <Suspense fallback={null}>
@@ -4865,6 +6508,18 @@ export function RetroOffice3D({
                 name={agent.name}
                 status={agent.status}
                 color={agentColorMap.get(agent.id) ?? "#888"}
+                avatarKind={"avatarKind" in agent ? agent.avatarKind : undefined}
+                animalSpecies={
+                  "animalSpecies" in agent ? agent.animalSpecies : undefined
+                }
+                animalAppearance={
+                  "animalAppearance" in agent
+                    ? agent.animalAppearance
+                    : undefined
+                }
+                catAppearance={
+                  "catAppearance" in agent ? agent.catAppearance : undefined
+                }
                 appearance={"avatarProfile" in agent ? agent.avatarProfile ?? null : null}
                 agentsRef={renderAgentsRef}
                 agentLookupRef={renderAgentLookupRef}
@@ -4877,14 +6532,17 @@ export function RetroOffice3D({
                     ? false
                     : standupMeeting?.phase === "in_progress"
                       ? Boolean(standupSpeechTextByAgentId[agent.id])
-                      : speechAgentIds.has(agent.id)
+                      : Boolean(localSpeechByAgentId[agent.id]) ||
+                        speechAgentIds.has(agent.id)
                 }
                 speechText={
                   isJanitor
                     ? null
                     : standupMeeting?.phase === "in_progress"
                       ? (standupSpeechTextByAgentId[agent.id] ?? null)
-                      : (speechTextByAgentId[agent.id] ?? null)
+                      : (localSpeechByAgentId[agent.id] ??
+                        speechTextByAgentId[agent.id] ??
+                        null)
                 }
                 suppressSpeechBubble={
                   suppressSceneSpeechBubbles &&
@@ -4985,57 +6643,33 @@ export function RetroOffice3D({
 
       {/* New Idea 2: Camera preset buttons — top left. */}
       {!immersiveOverlayActive ? (
-        <div className="absolute top-3 left-3 z-20 flex flex-col items-start gap-2">
-          <div className="flex items-center gap-1">
-            {(
-              [
-                {
-                  key: "overview",
-                  icon: <Maximize size={12} />,
-                  title: "Overview",
-                },
-                {
-                  key: "frontDesk",
-                  icon: <Monitor size={12} />,
-                  title: "Front desk",
-                },
-                { key: "lounge", icon: <Armchair size={12} />, title: "Lounge" },
-              ] as const
-            ).map(({ key, icon, title }) => (
-              <button
-                key={key}
-                title={title}
-                onClick={() => {
-                  cameraPresetRef.current = CAMERA_PRESET_MAP[key];
-                }}
-                className="w-7 h-7 flex items-center justify-center rounded-md bg-[#1c1610]/80 text-amber-500/60 border border-amber-900/20 hover:bg-[#2a1e14] hover:text-amber-400 backdrop-blur-sm transition-colors"
-              >
-                {icon}
-              </button>
-            ))}
-          </div>
-          {standupMeeting ? (
+        <div className="absolute top-3 left-3 flex items-center gap-1 z-10">
+          {(
+            [
+              {
+                key: "overview",
+                icon: <Maximize size={12} />,
+                title: "Overview",
+              },
+              {
+                key: "frontDesk",
+                icon: <Monitor size={12} />,
+                title: "Front desk",
+              },
+              { key: "lounge", icon: <Armchair size={12} />, title: "Lounge" },
+            ] as const
+          ).map(({ key, icon, title }) => (
             <button
-              type="button"
-              onClick={() => setStandupBoardOpen(true)}
-              className="rounded-xl border border-emerald-500/20 bg-[#0b1410]/90 px-3 py-2 text-left shadow-lg backdrop-blur-sm transition-colors hover:border-emerald-400/35 hover:bg-[#102017]/95"
+              key={key}
+              title={title}
+              onClick={() => {
+                cameraPresetRef.current = CAMERA_PRESET_MAP[key];
+              }}
+              className="w-7 h-7 flex items-center justify-center rounded-md bg-[#1c1610]/80 text-amber-500/60 border border-amber-900/20 hover:bg-[#2a1e14] hover:text-amber-400 backdrop-blur-sm transition-colors"
             >
-              <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-emerald-200/80">
-                Standup
-              </div>
-              <div className="mt-1 text-[11px] font-semibold text-white/90">
-                {standupMeeting.phase === "gathering"
-                  ? "Gathering in meeting room."
-                  : standupMeeting.phase === "in_progress"
-                    ? `Speaking: ${standupSpeakerCard?.agentName ?? "Team"}`
-                    : "Standup complete."}
-              </div>
-              <div className="mt-1 font-mono text-[10px] text-white/50">
-                {standupMeeting.arrivedAgentIds.length}/
-                {standupMeeting.participantOrder.length} arrived
-              </div>
+              {icon}
             </button>
-          ) : null}
+          ))}
         </div>
       ) : null}
 
@@ -5050,183 +6684,241 @@ export function RetroOffice3D({
         </div>
       ) : null}
 
-      {/* Agent roster — compact top summary with overflow panel. */}
-      {!immersiveOverlayActive ? (
-        <div className="absolute top-10 left-1/2 z-20 -translate-x-1/2">
-          <div className="flex items-center gap-2 rounded-full border border-amber-900/25 bg-[#1c1610]/92 px-2 py-2 shadow-lg backdrop-blur-sm">
-            <div className="flex items-center -space-x-1.5">
-              {compactRosterAgents.map((agent) => {
-                const status = agentStatusLookup[agent.id];
-                const isError = status?.isError ?? agent.status === "error";
-                const working = status?.working ?? agent.status === "working";
-                const mood = moodByAgentId[agent.id];
-                const dotClass = isError
-                  ? "bg-red-400"
-                  : working
-                    ? "bg-green-400"
-                    : "bg-yellow-400";
-                return (
-                  <button
-                    key={agent.id}
-                    type="button"
-                    title={agent.name}
-                    onMouseEnter={() => handleAgentHover(agent.id)}
-                    onMouseLeave={handleAgentUnhover}
-                    onClick={() => {
-                      setSpotlightAgentId(agent.id);
-                      onAgentEdit?.(agent.id);
-                    }}
-                    className={`relative flex h-8 w-8 items-center justify-center rounded-full border text-[9px] font-bold text-[#120e08] shadow transition-transform hover:-translate-y-0.5 ${
-                      spotlightAgentId === agent.id
-                        ? "border-amber-200/80 ring-2 ring-amber-200/20"
-                        : "border-[#120e08] hover:border-amber-200/50"
-                    }`}
-                    style={{ backgroundColor: agent.color }}
-                  >
-                    {/* E3 Idea 1: Mood emoji float. */}
-                    {mood ? (
-                      <span
-                        key={mood.ts}
-                        className="absolute -top-6 left-1/2 -translate-x-1/2 text-sm pointer-events-none"
-                        style={{ animation: "mood-float 2.5s ease-out forwards" }}
-                      >
-                        {mood.emoji}
-                      </span>
-                    ) : null}
-                    <span>{getAgentInitials(agent.name)}</span>
-                    <span
-                      className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border border-[#1c1610] ${dotClass}`}
-                    />
-                  </button>
-                );
-              })}
-              {hiddenAgentCount > 0 ? (
-                <button
-                  type="button"
-                  onClick={() => setAgentRosterOpen(true)}
-                  className="flex h-8 min-w-8 items-center justify-center rounded-full border border-amber-900/30 bg-[#120e08] px-2 text-[10px] font-semibold text-amber-200 transition-colors hover:border-amber-500/40 hover:text-white"
-                >
-                  +{hiddenAgentCount}
-                </button>
-              ) : null}
+      {!immersiveOverlayActive && standupMeeting ? (
+        <div className="absolute top-3 right-3 z-20 flex items-center gap-2">
+          <div className="rounded-xl border border-emerald-500/20 bg-[#0b1410]/90 px-3 py-2 text-right shadow-lg backdrop-blur-sm">
+            <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-emerald-200/80">
+              Standup
             </div>
-
-            <button
-              type="button"
-              onClick={() => setAgentRosterOpen((prev) => !prev)}
-              className="inline-flex items-center gap-2 rounded-full border border-amber-900/25 bg-black/20 px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.16em] text-amber-100 transition-colors hover:border-amber-500/35 hover:text-white"
-            >
-              <Users className="h-3.5 w-3.5" />
-              <span>{agents.length}</span>
-              <span className="hidden sm:inline">agents</span>
-            </button>
+            <div className="mt-1 text-[11px] font-semibold text-white/90">
+              {standupMeeting.phase === "gathering"
+                ? "Gathering in meeting room."
+                : standupMeeting.phase === "in_progress"
+                  ? `Speaking: ${standupSpeakerCard?.agentName ?? "Team"}`
+                  : "Standup complete."}
+            </div>
+            <div className="mt-1 font-mono text-[10px] text-white/50">
+              {standupMeeting.arrivedAgentIds.length}/
+              {standupMeeting.participantOrder.length} arrived
+            </div>
           </div>
+          <button
+            type="button"
+            onClick={() => setStandupBoardOpen(true)}
+            className="rounded-lg border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 font-mono text-[10px] uppercase tracking-[0.16em] text-emerald-100 transition-colors hover:border-emerald-400/50 hover:text-white"
+          >
+            Standup board
+          </button>
+        </div>
+      ) : null}
 
-          {agentRosterOpen ? (
-            <div className="absolute left-1/2 top-full mt-2 w-[min(92vw,560px)] -translate-x-1/2 rounded-2xl border border-amber-900/25 bg-[#120e08]/96 p-3 shadow-2xl backdrop-blur-sm">
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <div>
-                  <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-amber-500/70">
-                    Team roster
-                  </div>
-                  <div className="mt-1 text-sm font-semibold text-amber-100">
-                    Compact view for larger fleets.
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setAgentRosterOpen(false)}
-                  className="rounded-full border border-amber-900/25 p-2 text-amber-200 transition-colors hover:border-amber-500/35 hover:text-white"
-                  aria-label="Close roster"
+      {/* Agent cards — compact single row pinned to top. */}
+      {!immersiveOverlayActive ? (
+        <div className="absolute top-10 left-1/2 -translate-x-1/2 flex items-center gap-1.5 z-40">
+          {topBarAgents.map((agent) => {
+            const status = agentStatusLookup[agent.id];
+            const isError = status?.isError ?? agent.status === "error";
+            const working = status?.working ?? agent.status === "working";
+            const mood = moodByAgentId[agent.id];
+            const dotClass = isError
+              ? "bg-red-400"
+              : working
+                ? "bg-green-400"
+                : "bg-yellow-400";
+            const isCatStackChip =
+              Boolean(selectedCatChipAgent) &&
+              selectedCatChipAgent?.id === agent.id &&
+              catAgents.length > 0;
+            const hiddenCatCount = Math.max(0, catAgents.length - 1);
+            return (
+              <div
+                key={agent.id}
+                className="relative"
+                ref={isCatStackChip ? catChipStackRef : null}
+              >
+                {isCatStackChip ? (
+                  <>
+                    <div className="absolute inset-0 translate-x-[2px] translate-y-[3px] rounded-lg border border-amber-800/20 bg-[#120d08]/80" />
+                    <div className="absolute inset-0 translate-x-[1px] translate-y-[1.5px] rounded-lg border border-amber-700/20 bg-[#17110a]/85" />
+                  </>
+                ) : null}
+                <div
+                  className={`relative flex items-center gap-2 bg-[#1c1610]/90 backdrop-blur-sm px-2.5 py-1.5 rounded-lg border border-amber-900/20 shadow cursor-pointer select-none ${isCatStackChip ? "pr-2" : ""}`}
+                  onClick={() => {
+                    if (isCatStackChip) {
+                      setCatChipStackOpen((previous) => !previous);
+                    } else {
+                      setSpotlightAgentId((prev) =>
+                        prev === agent.id ? null : agent.id,
+                      );
+                    }
+                  }}
                 >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-
-              <div className="grid max-h-[min(60vh,420px)] gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
-                {agents.map((agent) => {
-                  const status = agentStatusLookup[agent.id];
-                  const isError = status?.isError ?? agent.status === "error";
-                  const working = status?.working ?? agent.status === "working";
-                  const dotClass = isError
-                    ? "bg-red-400"
-                    : working
-                      ? "bg-green-400"
-                      : "bg-yellow-400";
-                  const runCount = runCountByAgentId[agent.id] ?? 0;
-                  return (
-                    <div
-                      key={agent.id}
-                      className="flex items-center gap-2 rounded-xl border border-amber-900/20 bg-black/20 px-3 py-2"
+                  {/* E3 Idea 1: Mood emoji float. */}
+                  {mood && (
+                    <span
+                      key={mood.ts}
+                      className="absolute -top-6 left-1/2 -translate-x-1/2 text-sm pointer-events-none"
+                      style={{ animation: "mood-float 2.5s ease-out forwards" }}
                     >
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSpotlightAgentId(agent.id);
-                          onAgentEdit?.(agent.id);
-                          setAgentRosterOpen(false);
-                        }}
-                        className="flex min-w-0 flex-1 items-center gap-3 text-left"
-                      >
+                      {mood.emoji}
+                    </span>
+                  )}
+                  <div className="relative shrink-0">
+                    <div
+                      className="w-4 h-4 rounded-sm"
+                      style={{ backgroundColor: agent.color }}
+                    />
+                    <div
+                      className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full border border-[#1c1610] ${dotClass}`}
+                    />
+                  </div>
+                  <span className="text-[10px] font-semibold text-amber-100 whitespace-nowrap max-w-[128px] truncate">
+                    {agent.name}
+                  </span>
+                  {isCatStackChip && hiddenCatCount > 0 ? (
+                    <button
+                      title="Toggle animal stack"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setCatChipStackOpen((previous) => !previous);
+                      }}
+                      className="inline-flex items-center gap-1 rounded-full border border-amber-700/40 bg-amber-600/10 px-1.5 py-0.5 text-[8px] font-bold text-amber-300 hover:text-amber-100 transition-colors"
+                    >
+                      +{hiddenCatCount}
+                      <ChevronDown
+                        size={9}
+                        className={`transition-transform ${catChipStackOpen ? "rotate-180" : ""}`}
+                      />
+                    </button>
+                  ) : null}
+                  {/* Follow cam toggle button. */}
+                  <button
+                    title={
+                      followAgentId === agent.id
+                        ? "Exit follow cam"
+                        : "Follow cam"
+                    }
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setFollowAgentId((prev) =>
+                        prev === agent.id ? null : agent.id,
+                      );
+                    }}
+                    className={`w-4 h-4 flex items-center justify-center rounded transition-colors ${
+                      followAgentId === agent.id
+                        ? "text-white opacity-100"
+                        : "text-white/50 hover:text-white opacity-70 hover:opacity-100"
+                    }`}
+                  >
+                    <Camera size={9} />
+                  </button>
+                  <button
+                    title={
+                      monitorAgentId === agent.id
+                        ? "Close desk monitor"
+                        : "Open desk monitor"
+                    }
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onMonitorSelect?.(
+                        monitorAgentId === agent.id ? null : agent.id,
+                      );
+                    }}
+                    className={`w-4 h-4 flex items-center justify-center rounded transition-colors ${
+                      monitorAgentId === agent.id
+                        ? "text-emerald-300 opacity-100"
+                        : "text-white/50 hover:text-emerald-200 opacity-70 hover:opacity-100"
+                    }`}
+                  >
+                    <Monitor size={9} />
+                  </button>
+                  {/* Idea 9 (original): Run counter badge. */}
+                  {(runCountByAgentId[agent.id] ?? 0) > 0 && (
+                    <span className="text-[8px] font-bold bg-amber-600/30 text-amber-400 border border-amber-700/30 rounded-full px-1.5 py-0.5 leading-none">
+                      {runCountByAgentId[agent.id]}
+                    </span>
+                  )}
+                </div>
+                {isCatStackChip && catChipStackOpen && catAgents.length > 1 ? (
+                  <div className="absolute top-full left-0 mt-1 w-52 max-h-72 overflow-y-auto rounded-lg border border-amber-800/30 bg-[#120e08]/95 shadow-xl backdrop-blur-sm p-1.5 z-50">
+                    {catAgents.map((catAgent) => {
+                      const catStatus = agentStatusLookup[catAgent.id];
+                      const catIsError =
+                        catStatus?.isError ?? catAgent.status === "error";
+                      const catWorking =
+                        catStatus?.working ?? catAgent.status === "working";
+                      const catDotClass = catIsError
+                        ? "bg-red-400"
+                        : catWorking
+                          ? "bg-green-400"
+                          : "bg-yellow-400";
+                      const isSelected = selectedCatChipAgent?.id === catAgent.id;
+                      const isRemovableSyntheticCat =
+                        Boolean(onRemoveSyntheticCat) &&
+                        catAgent.id !== GARFIELD_COMPANION.agentId &&
+                        (catAgent.id.startsWith(SYNTHETIC_CAT_ID_PREFIX) ||
+                          catAgent.id.startsWith(SYNTHETIC_ANIMAL_ID_PREFIX));
+                      return (
                         <div
-                          className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-[#120e08]"
-                          style={{ backgroundColor: agent.color }}
+                          key={catAgent.id}
+                          role="button"
+                          tabIndex={0}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedCatChipId(catAgent.id);
+                            setCatChipStackOpen(false);
+                            setSpotlightAgentId(catAgent.id);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key !== "Enter" && e.key !== " ") return;
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setSelectedCatChipId(catAgent.id);
+                            setCatChipStackOpen(false);
+                            setSpotlightAgentId(catAgent.id);
+                          }}
+                          className={`group w-full flex items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors cursor-pointer ${isSelected ? "bg-amber-500/15 border border-amber-600/30" : "hover:bg-amber-600/10 border border-transparent"}`}
                         >
-                          {getAgentInitials(agent.name)}
-                          <span
-                            className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border border-[#120e08] ${dotClass}`}
-                          />
-                        </div>
-                        <div className="min-w-0">
-                          <div className="truncate text-sm font-semibold text-amber-100">
-                            {agent.name}
+                          <div className="relative shrink-0">
+                            <div
+                              className="w-3.5 h-3.5 rounded-sm"
+                              style={{ backgroundColor: catAgent.color }}
+                            />
+                            <div
+                              className={`absolute -bottom-0.5 -right-0.5 w-1.5 h-1.5 rounded-full border border-[#120e08] ${catDotClass}`}
+                            />
                           </div>
-                          <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-amber-500/70">
-                            {isError ? "error" : working ? "working" : "idle"}
-                            {runCount > 0 ? ` · ${runCount} runs` : ""}
-                          </div>
+                          <span className="text-[10px] text-amber-100 truncate flex-1">
+                            {catAgent.name}
+                          </span>
+                          {isSelected ? (
+                            <span className="text-[8px] uppercase tracking-wider text-amber-300">
+                              Top
+                            </span>
+                          ) : null}
+                          {isRemovableSyntheticCat ? (
+                            <button
+                              type="button"
+                              title={`Delete ${catAgent.name}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onRemoveSyntheticCat?.(catAgent.id);
+                                setCatChipStackOpen(false);
+                              }}
+                              className="ml-1 inline-flex h-4 w-4 items-center justify-center rounded border border-red-600/40 bg-red-500/10 text-red-300 opacity-0 transition-opacity hover:text-red-100 group-hover:opacity-100"
+                            >
+                              <X size={10} />
+                            </button>
+                          ) : null}
                         </div>
-                      </button>
-                      <button
-                        type="button"
-                        title={
-                          followAgentId === agent.id ? "Exit follow cam" : "Follow cam"
-                        }
-                        onClick={() =>
-                          setFollowAgentId((prev) => (prev === agent.id ? null : agent.id))
-                        }
-                        className={`flex h-8 w-8 items-center justify-center rounded-lg border transition-colors ${
-                          followAgentId === agent.id
-                            ? "border-amber-200/30 bg-amber-100/10 text-white"
-                            : "border-amber-900/20 text-white/60 hover:border-amber-500/35 hover:text-white"
-                        }`}
-                      >
-                        <Camera size={12} />
-                      </button>
-                      <button
-                        type="button"
-                        title={
-                          monitorAgentId === agent.id
-                            ? "Close desk monitor"
-                            : "Open desk monitor"
-                        }
-                        onClick={() =>
-                          onMonitorSelect?.(monitorAgentId === agent.id ? null : agent.id)
-                        }
-                        className={`flex h-8 w-8 items-center justify-center rounded-lg border transition-colors ${
-                          monitorAgentId === agent.id
-                            ? "border-emerald-300/30 bg-emerald-300/10 text-emerald-200"
-                            : "border-amber-900/20 text-white/60 hover:border-emerald-400/30 hover:text-emerald-200"
-                        }`}
-                      >
-                        <Monitor size={12} />
-                      </button>
-                    </div>
-                  );
-                })}
+                      );
+                    })}
+                  </div>
+                ) : null}
               </div>
-            </div>
-          ) : null}
+            );
+          })}
         </div>
       ) : null}
 
@@ -5919,34 +7611,397 @@ export function RetroOffice3D({
         </div>
       )}
 
-      {/* Object Drawer — bottom right above toolbar when open. */}
+      {/* Edit Drawer — bottom right above toolbar when open. */}
       {!immersiveOverlayActive && editMode && drawerOpen && !selectedItem && (
-        <div className="absolute bottom-14 right-3 w-52 max-h-[calc(100vh-100px)] overflow-y-auto rounded-lg bg-[#1c1610]/95 border border-amber-800/20 p-3 shadow-xl backdrop-blur-sm z-20">
-          <div className="text-[10px] text-amber-500/70 font-bold uppercase tracking-widest mb-3">
-            Objects
+        <div className="absolute bottom-14 right-3 w-[18.5rem] max-h-[calc(100vh-100px)] overflow-y-auto rounded-lg bg-[#1c1610]/95 border border-amber-800/20 p-3 shadow-xl backdrop-blur-sm z-20">
+          <div className="mb-3 flex items-center gap-1 rounded-md border border-amber-900/25 bg-[#120e08] p-1">
+            <button
+              type="button"
+              onClick={() => setEditDrawerTab("objects")}
+              className={`flex-1 rounded px-2 py-1 text-[10px] font-bold uppercase tracking-[0.16em] transition-colors ${
+                editDrawerTab === "objects"
+                  ? "bg-amber-500/20 text-amber-200"
+                  : "text-amber-500/75 hover:text-amber-300"
+              }`}
+            >
+              Objects
+            </button>
+            <button
+              type="button"
+              onClick={() => setEditDrawerTab("cat_topia")}
+              className={`flex-1 rounded px-2 py-1 text-[10px] font-bold uppercase tracking-[0.16em] transition-colors ${
+                editDrawerTab === "cat_topia"
+                  ? "bg-amber-500/20 text-amber-200"
+                  : "text-amber-500/75 hover:text-amber-300"
+              }`}
+            >
+              Zoo-Topia
+            </button>
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            {PALETTE.map((entry) => (
-              <button
-                key={entry.type}
-                onClick={() => startPlacing(entry.type)}
-                className={`flex flex-col items-center gap-1 p-2 rounded-md border transition-all text-center ${
-                  drag.kind === "placing" &&
-                  (drag as { kind: "placing"; itemType: string }).itemType ===
-                    entry.type
-                    ? "bg-amber-500/20 border-amber-500/50 text-amber-300"
-                    : "bg-[#120e08] border-amber-900/15 text-amber-200/70 hover:bg-[#261e16] hover:border-amber-800/30"
-                }`}
-              >
-                <span className="text-lg leading-none">{entry.icon}</span>
-                <span className="text-[9px] font-semibold uppercase tracking-wider leading-tight">
-                  {entry.label}
-                </span>
-              </button>
-            ))}
-          </div>
+          {editDrawerTab === "objects" ? (
+            <div>
+              <div className="mb-3 text-[10px] text-amber-500/70 font-bold uppercase tracking-widest">
+                Objects
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {PALETTE.map((entry) => (
+                  <button
+                    key={entry.type}
+                    onClick={() => startPlacing(entry.type)}
+                    className={`flex flex-col items-center gap-1 p-2 rounded-md border transition-all text-center ${
+                      drag.kind === "placing" &&
+                      (drag as { kind: "placing"; itemType: string }).itemType ===
+                        entry.type
+                        ? "bg-amber-500/20 border-amber-500/50 text-amber-300"
+                        : "bg-[#120e08] border-amber-900/15 text-amber-200/70 hover:bg-[#261e16] hover:border-amber-800/30"
+                    }`}
+                  >
+                    <span className="text-lg leading-none">{entry.icon}</span>
+                    <span className="text-[9px] font-semibold uppercase tracking-wider leading-tight">
+                      {entry.label}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div>
+              <div className="mb-3 text-[10px] text-amber-500/70 font-bold uppercase tracking-widest">
+                Zoo-Topia
+              </div>
+              <div className="space-y-3">
+                <label className="block">
+                  <div className="mb-1 flex items-center justify-between gap-2">
+                    <span className="block text-[10px] font-semibold uppercase tracking-[0.16em] text-amber-400/80">
+                      Main Animal Name
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setCatTopiaHelpField("mainCatName")}
+                      title="What does this setting do?"
+                      className="flex h-4 w-4 items-center justify-center rounded-full border border-amber-700/60 bg-[#1f170f] text-[10px] font-bold leading-none text-amber-300/90 transition-colors hover:border-amber-500/80 hover:text-amber-200"
+                    >
+                      i
+                    </button>
+                  </div>
+                  <input
+                    type="text"
+                    maxLength={CAT_TOPIA_MAIN_NAME_MAX_CHARS}
+                    value={resolvedCatTopiaSettings.mainCatName}
+                    onChange={(event) =>
+                      onCatTopiaSettingsChange?.({
+                        mainCatName: event.target.value,
+                      })
+                    }
+                    className="w-full rounded-md border border-amber-800/30 bg-[#120e08] px-2 py-2 text-[11px] text-amber-100 outline-none transition-colors focus:border-amber-500/45"
+                  />
+                </label>
+
+                <label className="block">
+                  <div className="mb-1 flex items-center justify-between gap-2">
+                    <span className="block text-[10px] font-semibold uppercase tracking-[0.16em] text-amber-400/80">
+                      Enabled Species
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setCatTopiaHelpField("enabledSpecies")}
+                      title="What does this setting do?"
+                      className="flex h-4 w-4 items-center justify-center rounded-full border border-amber-700/60 bg-[#1f170f] text-[10px] font-bold leading-none text-amber-300/90 transition-colors hover:border-amber-500/80 hover:text-amber-200"
+                    >
+                      i
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-1.5 rounded-md border border-amber-800/30 bg-[#120e08] p-2">
+                    {ZOO_SPECIES_OPTIONS.map((species) => {
+                      const checked = resolvedCatTopiaSettings.enabledSpecies.includes(
+                        species,
+                      );
+                      const label = getZooSpeciesMeta(species).label;
+                      return (
+                        <label
+                          key={species}
+                          className="flex items-center gap-1.5 rounded px-1 py-0.5 text-[10px] text-amber-100 hover:bg-amber-500/10"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(event) => {
+                              const selected = new Set(
+                                resolvedCatTopiaSettings.enabledSpecies,
+                              );
+                              if (event.target.checked) {
+                                selected.add(species);
+                              } else {
+                                selected.delete(species);
+                              }
+                              const next =
+                                selected.size > 0
+                                  ? Array.from(selected)
+                                  : (["cat"] as ZooSpecies[]);
+                              onCatTopiaSettingsChange?.({
+                                enabledSpecies: next,
+                              });
+                            }}
+                          />
+                          <span className="truncate">{label}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </label>
+
+                <label className="block">
+                  <div className="mb-1 flex items-center justify-between gap-2">
+                    <span className="block text-[10px] font-semibold uppercase tracking-[0.16em] text-amber-400/80">
+                      Animal Variety
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setCatTopiaHelpField("catVariety")}
+                      title="What does this setting do?"
+                      className="flex h-4 w-4 items-center justify-center rounded-full border border-amber-700/60 bg-[#1f170f] text-[10px] font-bold leading-none text-amber-300/90 transition-colors hover:border-amber-500/80 hover:text-amber-200"
+                    >
+                      i
+                    </button>
+                  </div>
+                  <select
+                    value={resolvedCatTopiaSettings.catVariety}
+                    onChange={(event) =>
+                      onCatTopiaSettingsChange?.({
+                        catVariety: event.target.value as CatTopiaSettings["catVariety"],
+                      })
+                    }
+                    className="w-full rounded-md border border-amber-800/30 bg-[#120e08] px-2 py-2 text-[11px] text-amber-100 outline-none transition-colors focus:border-amber-500/45"
+                  >
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                  </select>
+                </label>
+
+                <label className="block">
+                  <div className="mb-1 flex items-center justify-between gap-2">
+                    <span className="block text-[10px] font-semibold uppercase tracking-[0.16em] text-amber-400/80">
+                      Animal Activity Levels
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setCatTopiaHelpField("catActivityLevel")}
+                      title="What does this setting do?"
+                      className="flex h-4 w-4 items-center justify-center rounded-full border border-amber-700/60 bg-[#1f170f] text-[10px] font-bold leading-none text-amber-300/90 transition-colors hover:border-amber-500/80 hover:text-amber-200"
+                    >
+                      i
+                    </button>
+                  </div>
+                  <select
+                    value={resolvedCatTopiaSettings.catActivityLevel}
+                    onChange={(event) =>
+                      onCatTopiaSettingsChange?.({
+                        catActivityLevel: event.target.value as CatTopiaSettings["catActivityLevel"],
+                      })
+                    }
+                    className="w-full rounded-md border border-amber-800/30 bg-[#120e08] px-2 py-2 text-[11px] text-amber-100 outline-none transition-colors focus:border-amber-500/45"
+                  >
+                    <option value="low">Low (75%)</option>
+                    <option value="medium">Medium (100%)</option>
+                    <option value="high">High (150%)</option>
+                  </select>
+                </label>
+
+                <label className="block">
+                  <div className="mb-1 flex items-center justify-between gap-2">
+                    <span className="block text-[10px] font-semibold uppercase tracking-[0.16em] text-amber-400/80">
+                      New Animals Spawn / Hour
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setCatTopiaHelpField("catSpawnRatePerHour")}
+                      title="What does this setting do?"
+                      className="flex h-4 w-4 items-center justify-center rounded-full border border-amber-700/60 bg-[#1f170f] text-[10px] font-bold leading-none text-amber-300/90 transition-colors hover:border-amber-500/80 hover:text-amber-200"
+                    >
+                      i
+                    </button>
+                  </div>
+                  <input
+                    type="number"
+                    min={CAT_TOPIA_MIN_SPAWN_RATE_PER_HOUR}
+                    max={CAT_TOPIA_MAX_SPAWN_RATE_PER_HOUR}
+                    step={1}
+                    value={resolvedCatTopiaSettings.catSpawnRatePerHour}
+                    onChange={(event) =>
+                      onCatTopiaSettingsChange?.({
+                        catSpawnRatePerHour: Number(
+                          event.target.value,
+                        ),
+                      })
+                    }
+                    className="w-full rounded-md border border-amber-800/30 bg-[#120e08] px-2 py-2 text-[11px] text-amber-100 outline-none transition-colors focus:border-amber-500/45"
+                  />
+                  <div className="mt-1 text-[10px] text-amber-500/65">
+                    Allowed range: {CAT_TOPIA_MIN_SPAWN_RATE_PER_HOUR} to{" "}
+                    {CAT_TOPIA_MAX_SPAWN_RATE_PER_HOUR}. Set 0 to pause spawning.
+                  </div>
+                </label>
+
+                <label className="block">
+                  <div className="mb-1 flex items-center justify-between gap-2">
+                    <span className="block text-[10px] font-semibold uppercase tracking-[0.16em] text-amber-400/80">
+                      Session Animal Cap
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setCatTopiaHelpField("maxSpawnedCatsPerSession")
+                      }
+                      title="What does this setting do?"
+                      className="flex h-4 w-4 items-center justify-center rounded-full border border-amber-700/60 bg-[#1f170f] text-[10px] font-bold leading-none text-amber-300/90 transition-colors hover:border-amber-500/80 hover:text-amber-200"
+                    >
+                      i
+                    </button>
+                  </div>
+                  <input
+                    type="number"
+                    min={CAT_TOPIA_MIN_SESSION_CAT_CAP}
+                    max={CAT_TOPIA_MAX_SESSION_CAT_CAP}
+                    step={1}
+                    value={resolvedCatTopiaSettings.maxSpawnedCatsPerSession}
+                    onChange={(event) =>
+                      onCatTopiaSettingsChange?.({
+                        maxSpawnedCatsPerSession: Number(event.target.value),
+                      })
+                    }
+                    className="w-full rounded-md border border-amber-800/30 bg-[#120e08] px-2 py-2 text-[11px] text-amber-100 outline-none transition-colors focus:border-amber-500/45"
+                  />
+                  <div className="mt-1 text-[10px] text-amber-500/65">
+                    Allowed range: {CAT_TOPIA_MIN_SESSION_CAT_CAP} to{" "}
+                    {CAT_TOPIA_MAX_SESSION_CAT_CAP}.
+                  </div>
+                </label>
+
+                <label className="block">
+                  <div className="mb-1 flex items-center justify-between gap-2">
+                    <span className="block text-[10px] font-semibold uppercase tracking-[0.16em] text-amber-400/80">
+                      Animal Cuddle Level
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setCatTopiaHelpField("catCuddleLevel")}
+                      title="What does this setting do?"
+                      className="flex h-4 w-4 items-center justify-center rounded-full border border-amber-700/60 bg-[#1f170f] text-[10px] font-bold leading-none text-amber-300/90 transition-colors hover:border-amber-500/80 hover:text-amber-200"
+                    >
+                      i
+                    </button>
+                  </div>
+                  <select
+                    value={resolvedCatTopiaSettings.catCuddleLevel}
+                    onChange={(event) =>
+                      onCatTopiaSettingsChange?.({
+                        catCuddleLevel: event.target.value as CatTopiaSettings["catCuddleLevel"],
+                      })
+                    }
+                    className="w-full rounded-md border border-amber-800/30 bg-[#120e08] px-2 py-2 text-[11px] text-amber-100 outline-none transition-colors focus:border-amber-500/45"
+                  >
+                    <option value="cuddle_city">CuddleCity</option>
+                    <option value="express_lane">Express Lane</option>
+                    <option value="anxious">Anxious</option>
+                    <option value="normal">Normal</option>
+                  </select>
+                </label>
+
+                <label className="block">
+                  <div className="mb-1 flex items-center justify-between gap-2">
+                    <span className="block text-[10px] font-semibold uppercase tracking-[0.16em] text-amber-400/80">
+                      Animal Naming Convention
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setCatTopiaHelpField("catNamingConvention")}
+                      title="What does this setting do?"
+                      className="flex h-4 w-4 items-center justify-center rounded-full border border-amber-700/60 bg-[#1f170f] text-[10px] font-bold leading-none text-amber-300/90 transition-colors hover:border-amber-500/80 hover:text-amber-200"
+                    >
+                      i
+                    </button>
+                  </div>
+                  <input
+                    type="text"
+                    maxLength={CAT_TOPIA_NAMING_CONVENTION_MAX_CHARS}
+                    value={resolvedCatTopiaSettings.catNamingConvention}
+                    list="cat-topia-naming-presets"
+                    onChange={(event) =>
+                      onCatTopiaSettingsChange?.({
+                        catNamingConvention: event.target.value,
+                      })
+                    }
+                    className="w-full rounded-md border border-amber-800/30 bg-[#120e08] px-2 py-2 text-[11px] text-amber-100 outline-none transition-colors focus:border-amber-500/45"
+                  />
+                  <datalist id="cat-topia-naming-presets">
+                    {CAT_TOPIA_NAMING_PRESETS.map((preset) => (
+                      <option key={preset} value={preset} />
+                    ))}
+                  </datalist>
+                  <div className="mt-1 text-[10px] text-amber-500/65">
+                    Try: funny, silly, hilarious, wild, peace and love, punk rock.
+                  </div>
+                </label>
+              </div>
+            </div>
+          )}
         </div>
       )}
+
+      {!immersiveOverlayActive && editMode && catTopiaHelpField ? (
+        <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/55 p-4">
+          <div className="w-full max-w-md overflow-hidden rounded-xl border border-amber-700/35 bg-[#120d08] shadow-2xl">
+            <div className="flex items-start justify-between border-b border-amber-800/30 px-4 py-3">
+              <div>
+                <div className="text-[10px] font-bold uppercase tracking-[0.22em] text-amber-500/80">
+                  Zoo-Topia Help
+                </div>
+                <div className="mt-1 text-sm font-semibold text-amber-100">
+                  {CAT_TOPIA_HELP_COPY[catTopiaHelpField].title}
+                </div>
+                <p className="mt-1 text-[11px] leading-relaxed text-amber-200/80">
+                  {CAT_TOPIA_HELP_COPY[catTopiaHelpField].summary}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCatTopiaHelpField(null)}
+                className="flex h-7 w-7 items-center justify-center rounded-md border border-amber-800/30 bg-[#1d140d] text-amber-300/80 transition-colors hover:border-amber-500/45 hover:text-amber-100"
+                aria-label="Close Zoo-Topia help"
+              >
+                <X size={12} />
+              </button>
+            </div>
+            <div className="space-y-3 px-4 py-3">
+              <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-amber-500/75">
+                What This Means
+              </div>
+              <ul className="space-y-2 pl-4 text-[11px] leading-relaxed text-amber-100/90">
+                {CAT_TOPIA_HELP_COPY[catTopiaHelpField].meanings.map((line) => (
+                  <li key={line} className="list-disc marker:text-amber-500/70">
+                    {line}
+                  </li>
+                ))}
+              </ul>
+              {CAT_TOPIA_HELP_COPY[catTopiaHelpField].note ? (
+                <div className="rounded-md border border-amber-800/35 bg-[#1a130d] px-3 py-2 text-[11px] leading-relaxed text-amber-200/85">
+                  {CAT_TOPIA_HELP_COPY[catTopiaHelpField].note}
+                </div>
+              ) : null}
+            </div>
+            <div className="border-t border-amber-800/25 px-4 py-3">
+              <button
+                type="button"
+                onClick={() => setCatTopiaHelpField(null)}
+                className="w-full rounded-md border border-amber-700/45 bg-amber-500/15 px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-amber-200 transition-colors hover:bg-amber-500/25"
+              >
+                Got It
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {/* Toolbar — top right. */}
       {!immersiveOverlayActive ? (
@@ -6021,55 +8076,54 @@ export function RetroOffice3D({
         </div>
       ) : null}
       {settingsModalOpen ? (
-        <div className="absolute inset-0 z-30 flex items-start justify-end overflow-y-auto bg-black/35 p-4 backdrop-blur-[1px]">
-          <div className="flex max-h-[calc(100vh-2rem)] w-full max-w-sm flex-col overflow-hidden rounded-xl border border-cyan-500/20 bg-[#05090d]/95 shadow-2xl">
+        <div className="absolute inset-0 z-30 flex items-start justify-end bg-black/35 p-4 backdrop-blur-[1px]">
+          <div className="w-full max-w-sm overflow-hidden rounded-xl border border-cyan-500/20 bg-[#05090d]/95 shadow-2xl">
             <div className="flex items-start justify-between border-b border-cyan-500/10 px-4 py-3">
               <div>
                 <div className="font-mono text-[10px] font-semibold tracking-[0.28em] text-cyan-300/75">
-                  STUDIO SETTINGS
+                  VOICE SETTINGS
                 </div>
                 <div className="mt-1 text-[11px] text-white/45">
-                  Customize the office banner and spoken replies across the app.
+                  Control natural-sounding spoken replies for agents across the
+                  app.
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => setSettingsModalOpen(false)}
                 className="flex h-7 w-7 items-center justify-center rounded-md border border-cyan-500/10 bg-black/20 text-cyan-100/70 transition-colors hover:border-cyan-400/30 hover:text-cyan-100"
-                aria-label="Close studio settings"
+                aria-label="Close voice settings"
               >
                 <X size={12} />
               </button>
             </div>
-            <div className="min-h-0 flex-1 overflow-y-auto">
-              <SettingsPanel
-                gatewayStatus={gatewayStatus}
-                gatewayUrl={atmAnalytics?.gatewayUrl}
-                onGatewayDisconnect={() => {
-                  onGatewayDisconnect?.();
-                  setSettingsModalOpen(false);
-                }}
-                officeTitle={officeTitle}
-                officeTitleLoaded={officeTitleLoaded}
-                onOfficeTitleChange={(title) => onOfficeTitleChange?.(title)}
-                voiceRepliesEnabled={voiceRepliesEnabled}
-                voiceRepliesVoiceId={voiceRepliesVoiceId}
-                voiceRepliesSpeed={voiceRepliesSpeed}
-                voiceRepliesLoaded={voiceRepliesLoaded}
-                onVoiceRepliesToggle={(enabled) =>
-                  onVoiceRepliesToggle?.(enabled)
-                }
-                onVoiceRepliesVoiceChange={(voiceId) =>
-                  onVoiceRepliesVoiceChange?.(voiceId)
-                }
-                onVoiceRepliesSpeedChange={(speed) =>
-                  onVoiceRepliesSpeedChange?.(speed)
-                }
-                onVoiceRepliesPreview={(voiceId, voiceName) =>
-                  onVoiceRepliesPreview?.(voiceId, voiceName)
-                }
-              />
-            </div>
+            <SettingsPanel
+              gatewayStatus={gatewayStatus}
+              gatewayUrl={atmAnalytics?.gatewayUrl}
+              onGatewayDisconnect={() => {
+                onGatewayDisconnect?.();
+                setSettingsModalOpen(false);
+              }}
+              officeTitle={officeTitle}
+              officeTitleLoaded={officeTitleLoaded}
+              onOfficeTitleChange={(title) => onOfficeTitleChange?.(title)}
+              voiceRepliesEnabled={voiceRepliesEnabled}
+              voiceRepliesVoiceId={voiceRepliesVoiceId}
+              voiceRepliesSpeed={voiceRepliesSpeed}
+              voiceRepliesLoaded={voiceRepliesLoaded}
+              onVoiceRepliesToggle={(enabled) =>
+                onVoiceRepliesToggle?.(enabled)
+              }
+              onVoiceRepliesVoiceChange={(voiceId) =>
+                onVoiceRepliesVoiceChange?.(voiceId)
+              }
+              onVoiceRepliesSpeedChange={(speed) =>
+                onVoiceRepliesSpeedChange?.(speed)
+              }
+              onVoiceRepliesPreview={(voiceId, voiceName) =>
+                onVoiceRepliesPreview?.(voiceId, voiceName)
+              }
+            />
           </div>
         </div>
       ) : null}
@@ -6083,10 +8137,12 @@ export function RetroOffice3D({
           .map((ev) => (
             <div
               key={`${ev.id}-${ev.ts}`}
-              className="flex items-center gap-2 bg-black/60 backdrop-blur-sm rounded-full px-3 py-1 text-[10px] font-mono"
+              className="flex max-w-[28rem] items-center gap-2 rounded-full bg-black/60 px-3 py-1 text-[10px] font-mono backdrop-blur-sm"
             >
               <span className="text-amber-400/80 font-semibold">{ev.name}</span>
-              <span className="text-amber-600/70">{ev.text}</span>
+              <span className="truncate text-amber-600/70">
+                {clampOverlayText(ev.text, STATUS_FEED_TEXT_MAX_CHARS)}
+              </span>
             </div>
           ))}
         {/* Ideas 6 + 8: Gateway status, agent counts, vibe score. */}

@@ -1,4 +1,5 @@
 import type { TranscriptEntry } from "@/features/agents/state/transcript";
+import { GARFIELD_CAT_INTENT_PATTERNS } from "@/lib/office/garfield";
 import { stripUiMetadata } from "@/lib/text/message-extract";
 
 // This module is the single natural-language entry point for office movement and room intents.
@@ -8,6 +9,7 @@ export type OfficeDeskDirective = "desk" | "release";
 export type OfficeGithubDirective = "github" | "release";
 export type OfficeGymDirective = "gym" | "release";
 export type OfficeQaDirective = "qa_lab" | "release";
+export type OfficeCatDirective = "cat_lounge";
 export type OfficeStandupDirective = "standup";
 export type OfficeCallPhase = "needs_message" | "ready_to_call";
 export type OfficeTextPhase = "needs_message" | "ready_to_send";
@@ -32,6 +34,7 @@ export type OfficeIntentSnapshot = {
       }
     | null;
   qa: OfficeQaDirective | null;
+  cat: OfficeCatDirective | null;
   art: null;
   standup: OfficeStandupDirective | null;
   call: OfficeCallDirective | null;
@@ -288,6 +291,14 @@ const resolveOfficeStandupDirectiveFromNormalized = (
     : null;
 };
 
+const resolveOfficeCatDirectiveFromNormalized = (
+  normalized: string,
+): OfficeCatDirective | null => {
+  return GARFIELD_CAT_INTENT_PATTERNS.some((pattern) => pattern.test(normalized))
+    ? "cat_lounge"
+    : null;
+};
+
 const normalizeOfficeCallCallee = (value: string): string => {
   return value
     .replace(/^(?:please|can you|could you|would you)\s+/i, "")
@@ -310,13 +321,26 @@ const resolveOfficeCallDirectiveFromNormalized = (
   if (
     normalized.includes("call it a day") ||
     normalized.includes("callback") ||
-    normalized.includes("call stack")
+    normalized.includes("call stack") ||
+    /\b(?:api|tool|function|method|endpoint|rpc|mcp|http|https|database|db|graphql|sql)\s+call\b/.test(
+      normalized,
+    ) ||
+    /\bcall\s+(?:fails?|failed|failing|error|errors|trace|stack)\b/.test(
+      normalized,
+    )
   ) {
     return null;
   }
-  const match = normalized.match(
-    /\b(?:make|place|start)?\s*(?:a\s+)?call(?:\s+to)?\s+(.+)$/,
-  ) ?? normalized.match(/\bcall\s+(.+)$/);
+  const match =
+    normalized.match(
+      /^(?:(?:please|pls)\s+)?(?:(?:can|could|would)\s+you\s+)?(?:(?:make|place|start)\s+)?(?:a\s+)?call(?:\s+to)?\s+(.+)$/,
+    ) ??
+    normalized.match(
+      /^(?:(?:please|pls)\s+)?(?:(?:can|could|would)\s+you\s+)?(?:(?:lets|let's)\s+)?call\s+(.+)$/,
+    ) ??
+    normalized.match(
+      /^(?:(?:please|pls)\s+)?(?:(?:can|could|would)\s+you\s+)?give\s+(.+?)\s+a\s+call$/,
+    );
   const tail = match?.[1]?.trim() ?? "";
   if (!tail) return null;
 
@@ -418,6 +442,7 @@ export const resolveOfficeIntentSnapshot = (
       github: null,
       gym: null,
       qa: null,
+      cat: null,
       art: null,
       standup: null,
       call: null,
@@ -435,6 +460,7 @@ export const resolveOfficeIntentSnapshot = (
     normalized,
   );
   const qaDirective = resolveOfficeQaDirectiveFromNormalized(normalized);
+  const catDirective = resolveOfficeCatDirectiveFromNormalized(normalized);
   const gymSkillDirective = resolveOfficeGymSkillDirectiveFromNormalized(normalized);
   const standupDirective = resolveOfficeStandupDirectiveFromNormalized(normalized);
   const callDirective = resolveOfficeCallDirectiveFromNormalized(normalized);
@@ -467,6 +493,7 @@ export const resolveOfficeIntentSnapshot = (
         : null,
     gym: gymDirective,
     qa: qaDirective,
+    cat: catDirective,
     art: null,
     standup: standupDirective,
     call: callDirective,
@@ -500,6 +527,10 @@ export const resolveOfficeQaDirective = (
   value: string | null | undefined,
 ): OfficeQaDirective | null => resolveOfficeIntentSnapshot(value).qa;
 
+export const resolveOfficeCatDirective = (
+  value: string | null | undefined,
+): OfficeCatDirective | null => resolveOfficeIntentSnapshot(value).cat;
+
 export const resolveOfficeStandupDirective = (
   value: string | null | undefined,
 ): OfficeStandupDirective | null => resolveOfficeIntentSnapshot(value).standup;
@@ -518,6 +549,7 @@ const resolveTranscriptDirective = <
     | OfficeGithubDirective
     | OfficeGymDirective
     | OfficeQaDirective
+    | OfficeCatDirective
     | OfficeStandupDirective,
 >(
   entries: TranscriptEntry[] | undefined,

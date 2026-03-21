@@ -31,6 +31,10 @@ export type AgentModelProps = {
   name: string;
   status: OfficeAgent["status"];
   color: string;
+  avatarKind?: OfficeAgent["avatarKind"];
+  animalSpecies?: OfficeAgent["animalSpecies"];
+  animalAppearance?: OfficeAgent["animalAppearance"];
+  catAppearance?: OfficeAgent["catAppearance"];
   appearance?: AgentAvatarProfile | null;
   agentsRef: RefObject<RenderAgent[]>;
   agentLookupRef?: RefObject<Map<string, RenderAgent>>;

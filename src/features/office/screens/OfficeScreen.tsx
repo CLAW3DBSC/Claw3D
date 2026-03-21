@@ -48,6 +48,34 @@ import {
   stripUiMetadata,
 } from "@/lib/text/message-extract";
 import { resolveOfficeIntentSnapshot } from "@/lib/office/deskDirectives";
+import { GARFIELD_COMPANION } from "@/lib/office/garfield";
+import {
+  ANIMAL_AGENT_ID_PREFIX,
+  CAT_AGENT_ID_PREFIX,
+  ZOO_NAMES_MARKDOWN_PATH,
+  buildCompanionAnimalAgent,
+  buildGarfieldCompanionAgent,
+  getCatColonySpawnSettings,
+  getFallbackZooNames,
+  parseZooNamesMarkdown,
+  pickRandomEnabledZooSpecies,
+  pickRandomZooName,
+  resolveSpawnAnimalAppearance,
+} from "@/lib/office/catColony";
+import {
+  CAT_TOPIA_DEFAULT_SETTINGS,
+  CAT_TOPIA_LEGACY_STORAGE_KEY,
+  CAT_TOPIA_NAMING_CONVENTION_MAX_CHARS,
+  CAT_TOPIA_STORAGE_KEY,
+  ZOO_SPECIES_OPTIONS,
+  applyCatNamingConvention,
+  claimUniqueCatName,
+  normalizeCatTopiaSettings,
+  randomCatSpawnIntervalMsForRate,
+  resolveSpawnedCatActivityMultiplier,
+  type CatTopiaSettings,
+  type ZooSpecies,
+} from "@/lib/office/catTopia";
 import { AgentChatPanel } from "@/features/agents/components/AgentChatPanel";
 import {
   AgentEditorModal,
@@ -93,6 +121,7 @@ import {
   type VoiceSendPayload,
 } from "@/hooks/useVoiceRecorder";
 import { useVoiceReplyPlayback } from "@/hooks/useVoiceReplyPlayback";
+import { RESERVED_MAIN_AGENT_ID } from "@/lib/agents/constants";
 import {
   buildOfficeAnimationState,
   clearOfficeAnimationTriggerHold,
@@ -133,7 +162,7 @@ const ITEMS = [
   "laptop",
 ];
 const GYM_WORKOUT_LATCH_MS = 60_000;
-const MAIN_AGENT_ID = "main";
+const MAIN_AGENT_ID = RESERVED_MAIN_AGENT_ID;
 const MAX_OPENCLAW_LOG_ENTRIES = 200;
 const MAX_OPENCLAW_AGENT_OUTPUT_LINES = 12;
 
@@ -207,9 +236,32 @@ const formatOpenClawValue = (value: string | null | undefined) => {
 
 const buildPhoneCallOutputLine = (text: string) => `[phone booth] ${text}`;
 const buildTextMessageOutputLine = (text: string) => `[messaging booth] ${text}`;
+const buildCatLoungeOutputLine = (text: string) => `[cat lounge] ${text}`;
+const OFFICE_ACK_ONLY_FOLLOW_UP_MESSAGES = new Set([
+  "k",
+  "ok",
+  "okay",
+  "yes",
+  "y",
+  "yeah",
+  "yep",
+  "sure",
+  "no",
+  "n",
+  "nope",
+]);
 
 const PHONE_BOOTH_ASSISTANT_FALLBACK_RE =
   /\b(?:i\s+)?can(?:not|['’]t)\s+(?:place|make)\s+(?:phone\s+)?calls?\b/i;
+
+const isAckOnlyOfficeFollowUpMessage = (value: string): boolean => {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[.!?]+$/g, "");
+  if (!normalized) return false;
+  return OFFICE_ACK_ONLY_FOLLOW_UP_MESSAGES.has(normalized);
+};
 
 const shouldSuppressPhoneBoothAssistantReply = (params: {
   agents: AgentState[];
@@ -370,6 +422,27 @@ const getDeterministicItem = (id: string) => {
 };
 
 const mapAgentToOffice = (agent: AgentState): OfficeAgent => {
+  const isLegacySyntheticCat = agent.agentId.startsWith(`${CAT_AGENT_ID_PREFIX}-`);
+  const isSyntheticAnimal = agent.agentId.startsWith(`${ANIMAL_AGENT_ID_PREFIX}-`);
+  const isAnimalAgent =
+    agent.agentId === GARFIELD_COMPANION.agentId ||
+    isLegacySyntheticCat ||
+    isSyntheticAnimal;
+  const inferredSpecies: ZooSpecies | undefined = (() => {
+    if (agent.agentId === GARFIELD_COMPANION.agentId) return "cat";
+    const tokens = agent.agentId.split("-");
+    const possible = tokens[2] ?? "";
+    return (ZOO_SPECIES_OPTIONS as readonly string[]).includes(possible)
+      ? (possible as ZooSpecies)
+      : isLegacySyntheticCat
+        ? "cat"
+        : undefined;
+  })();
+  const avatarKind = isAnimalAgent
+    ? inferredSpecies === "cat"
+      ? "cat"
+      : "animal"
+    : "human";
   if (agent.status === "error") {
     return {
       id: agent.agentId,
@@ -377,6 +450,8 @@ const mapAgentToOffice = (agent: AgentState): OfficeAgent => {
       status: "error",
       color: stringToColor(agent.agentId),
       item: getDeterministicItem(agent.agentId),
+      avatarKind,
+      animalSpecies: inferredSpecies,
       avatarProfile: agent.avatarProfile ?? null,
     };
   }
@@ -387,9 +462,14 @@ const mapAgentToOffice = (agent: AgentState): OfficeAgent => {
     status: isWorking ? "working" : "idle",
     color: stringToColor(agent.agentId),
     item: getDeterministicItem(agent.agentId),
+    avatarKind,
+    animalSpecies: inferredSpecies,
     avatarProfile: agent.avatarProfile ?? null,
   };
 };
+
+const truncateValue = (value: string, maxChars: number): string =>
+  value.slice(0, maxChars).trim();
 
 type ChatHistoryResult = {
   messages?: Array<Record<string, unknown>>;
@@ -641,6 +721,15 @@ type OfficeScreenProps = {
   showOpenClawConsole?: boolean;
 };
 
+type ZooRipPortrait = {
+  id: string;
+  name: string;
+  species: ZooSpecies;
+  color: string;
+  accentColor: string;
+  createdAt: number;
+};
+
 export function OfficeScreen({
   showOpenClawConsole = true,
 }: OfficeScreenProps) {
@@ -672,11 +761,20 @@ export function OfficeScreen({
   const [clockTick, setClockTick] = useState(0);
   const [debugRows, setDebugRows] = useState<OfficeDebugRow[]>([]);
   const [feedEvents, setFeedEvents] = useState<OfficeFeedEvent[]>([]);
+  const [zooNamePool, setZooNamePool] = useState(() => getFallbackZooNames());
+  const [catTopiaSettings, setCatTopiaSettings] = useState<CatTopiaSettings>(
+    CAT_TOPIA_DEFAULT_SETTINGS,
+  );
+  const [syntheticCompanionAnimals, setSyntheticCompanionAnimals] = useState<
+    OfficeAgent[]
+  >(() => [buildGarfieldCompanionAgent()]);
+  const [zooRipPortraits, setZooRipPortraits] = useState<ZooRipPortrait[]>([]);
   const officeAgentCacheRef = useRef<
     Map<
       string,
       {
         agent: AgentState;
+        catHeld: boolean;
         deskHeld: boolean;
         gymHeld: boolean;
         latchedWorking: boolean;
@@ -687,6 +785,20 @@ export function OfficeScreen({
       }
     >
   >(new Map());
+  const syntheticCatUsedNamesRef = useRef<Set<string>>(
+    new Set([GARFIELD_COMPANION.name.toLowerCase()]),
+  );
+  const syntheticCatSpawnedCountRef = useRef(0);
+  const syntheticCatSpawnedTodayRef = useRef(0);
+  const syntheticCatSpawnDayRef = useRef(
+    new Date().toISOString().slice(0, 10),
+  );
+  const syntheticCatNextSpawnAtRef = useRef(
+    Date.now() +
+      randomCatSpawnIntervalMsForRate(
+        CAT_TOPIA_DEFAULT_SETTINGS.catSpawnRatePerHour,
+      ),
+  );
   const deskMonitorCacheRef = useRef<
     Map<string, { agent: AgentState; monitor: OfficeDeskMonitor }>
   >(new Map());
@@ -893,6 +1005,187 @@ export function OfficeScreen({
       window.clearInterval(timerId);
     };
   }, []);
+
+  const runtimeHasCompanionAnimals = useMemo(
+    () =>
+      state.agents.some(
+        (agent) =>
+          agent.agentId === GARFIELD_COMPANION.agentId ||
+          agent.agentId.startsWith(`${CAT_AGENT_ID_PREFIX}-`) ||
+          agent.agentId.startsWith(`${ANIMAL_AGENT_ID_PREFIX}-`),
+      ),
+    [state.agents],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch(ZOO_NAMES_MARKDOWN_PATH, {
+          cache: "no-store",
+        });
+        if (!response.ok) return;
+        const markdown = await response.text();
+        if (cancelled) return;
+        setZooNamePool(parseZooNamesMarkdown(markdown));
+      } catch {
+        // Keep fallback names when markdown is unavailable.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    try {
+      const stored =
+        window.localStorage.getItem(CAT_TOPIA_STORAGE_KEY) ??
+        window.localStorage.getItem(CAT_TOPIA_LEGACY_STORAGE_KEY);
+      if (!stored) return;
+      const parsed = JSON.parse(stored) as Partial<CatTopiaSettings>;
+      setCatTopiaSettings(normalizeCatTopiaSettings(parsed));
+    } catch {
+      // Ignore malformed local settings and keep defaults.
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        CAT_TOPIA_STORAGE_KEY,
+        JSON.stringify(catTopiaSettings),
+      );
+    } catch {
+      // Ignore storage write failures.
+    }
+  }, [catTopiaSettings]);
+
+  useEffect(() => {
+    const activityMultiplier = resolveSpawnedCatActivityMultiplier(
+      catTopiaSettings.catActivityLevel,
+    );
+    setSyntheticCompanionAnimals((previous) =>
+      previous.map((cat) => {
+        if (cat.id === GARFIELD_COMPANION.agentId) {
+          const nextMainName = truncateValue(
+            catTopiaSettings.mainCatName,
+            12,
+          );
+          if (cat.name === nextMainName) return cat;
+          return {
+            ...cat,
+            name: nextMainName,
+          };
+        }
+        if (cat.activityMultiplier === activityMultiplier) return cat;
+        return {
+          ...cat,
+          activityMultiplier,
+        };
+      }),
+    );
+  }, [catTopiaSettings.catActivityLevel, catTopiaSettings.mainCatName]);
+
+  useEffect(() => {
+    if (runtimeHasCompanionAnimals) return;
+    if (catTopiaSettings.catSpawnRatePerHour <= 0) {
+      syntheticCatNextSpawnAtRef.current = Number.MAX_SAFE_INTEGER;
+      return;
+    }
+    syntheticCatNextSpawnAtRef.current =
+      Date.now() +
+      randomCatSpawnIntervalMsForRate(catTopiaSettings.catSpawnRatePerHour);
+  }, [catTopiaSettings.catSpawnRatePerHour, runtimeHasCompanionAnimals]);
+
+  useEffect(() => {
+    if (runtimeHasCompanionAnimals) return;
+    const colonySettings = getCatColonySpawnSettings();
+    const tickSpawn = () => {
+      if (catTopiaSettings.catSpawnRatePerHour <= 0) {
+        syntheticCatNextSpawnAtRef.current = Number.MAX_SAFE_INTEGER;
+        return;
+      }
+      const now = Date.now();
+      const todayKey = new Date(now).toISOString().slice(0, 10);
+      if (syntheticCatSpawnDayRef.current !== todayKey) {
+        syntheticCatSpawnDayRef.current = todayKey;
+        syntheticCatSpawnedTodayRef.current = 0;
+      }
+      if (now < syntheticCatNextSpawnAtRef.current) return;
+      const reachedGlobalLimit =
+        syntheticCatSpawnedCountRef.current >=
+        catTopiaSettings.maxSpawnedCatsPerSession;
+      if (reachedGlobalLimit) return;
+      const reachedDailyLimit =
+        typeof colonySettings.maxSpawnedCatsPerDay === "number" &&
+        colonySettings.maxSpawnedCatsPerDay > 0 &&
+        syntheticCatSpawnedTodayRef.current >=
+          colonySettings.maxSpawnedCatsPerDay;
+      if (reachedDailyLimit) {
+        syntheticCatNextSpawnAtRef.current =
+          now +
+          randomCatSpawnIntervalMsForRate(catTopiaSettings.catSpawnRatePerHour);
+        return;
+      }
+
+      const species = pickRandomEnabledZooSpecies(
+        catTopiaSettings.enabledSpecies,
+      );
+      const baseName = pickRandomZooName(species, zooNamePool, new Set<string>());
+      const styledName = applyCatNamingConvention(
+        baseName,
+        truncateValue(
+          catTopiaSettings.catNamingConvention,
+          CAT_TOPIA_NAMING_CONVENTION_MAX_CHARS,
+        ),
+      );
+      const catName = claimUniqueCatName(
+        styledName,
+        syntheticCatUsedNamesRef.current,
+      );
+      const catId = `${ANIMAL_AGENT_ID_PREFIX}-${species}-${randomUUID().slice(0, 8)}`;
+      const mainCatAppearance =
+        syntheticCompanionAnimals.find(
+          (cat) => cat.id === GARFIELD_COMPANION.agentId,
+        )?.animalAppearance ?? undefined;
+      const nextCat = buildCompanionAnimalAgent({
+        id: catId,
+        name: catName,
+        species,
+        appearance: resolveSpawnAnimalAppearance(
+          catTopiaSettings.catVariety,
+          species,
+          mainCatAppearance,
+        ),
+        activityMultiplier: resolveSpawnedCatActivityMultiplier(
+          catTopiaSettings.catActivityLevel,
+        ),
+      });
+      setSyntheticCompanionAnimals((previous) => [...previous, nextCat]);
+      syntheticCatSpawnedCountRef.current += 1;
+      syntheticCatSpawnedTodayRef.current += 1;
+      syntheticCatNextSpawnAtRef.current =
+        now +
+        randomCatSpawnIntervalMsForRate(catTopiaSettings.catSpawnRatePerHour);
+    };
+
+    tickSpawn();
+    const timerId = window.setInterval(tickSpawn, 2_500);
+    return () => {
+      window.clearInterval(timerId);
+    };
+  }, [
+    zooNamePool,
+    catTopiaSettings.catActivityLevel,
+    catTopiaSettings.catNamingConvention,
+    catTopiaSettings.catSpawnRatePerHour,
+    catTopiaSettings.catVariety,
+    catTopiaSettings.maxSpawnedCatsPerSession,
+    catTopiaSettings.enabledSpecies,
+    runtimeHasCompanionAnimals,
+    syntheticCompanionAnimals,
+  ]);
 
   useEffect(() => {
     if (status === "connecting") {
@@ -1700,6 +1993,7 @@ export function OfficeScreen({
     ],
   );
   const {
+    catHoldByAgentId,
     deskHoldByAgentId,
     githubHoldByAgentId,
     manualGymUntilByAgentId,
@@ -2187,7 +2481,7 @@ export function OfficeScreen({
           createOpenClawLogEntry({
             eventName: "office-intent",
             eventKind: "derived",
-            summary: `agent=${agentId} gym=${intentSnapshot.gym?.source ?? "-"} qa=${intentSnapshot.qa ?? "-"} github=${intentSnapshot.github ?? "-"} desk=${intentSnapshot.desk ?? "-"} text=${intentSnapshot.text?.phase ?? "-"}`,
+            summary: `agent=${agentId} gym=${intentSnapshot.gym?.source ?? "-"} qa=${intentSnapshot.qa ?? "-"} github=${intentSnapshot.github ?? "-"} desk=${intentSnapshot.desk ?? "-"} cat=${intentSnapshot.cat ?? "-"} text=${intentSnapshot.text?.phase ?? "-"}`,
             payload: {
               agentId,
               message: trimmed,
@@ -2200,32 +2494,43 @@ export function OfficeScreen({
       });
       const pendingPhoneCall = phoneCallByAgentId[agentId] ?? null;
       const pendingTextMessage = textMessageByAgentId[agentId] ?? null;
+      const isAckOnlyFollowUp = isAckOnlyOfficeFollowUpMessage(trimmed);
       const hasImmediateOfficeTrigger = Boolean(
         intentSnapshot.desk ||
           intentSnapshot.github ||
           intentSnapshot.gym ||
           intentSnapshot.qa ||
+          intentSnapshot.cat ||
           intentSnapshot.standup ||
           intentSnapshot.text,
       );
       const isPhoneCallFollowUp =
         pendingPhoneCall?.phase === "needs_message" &&
+        !isAckOnlyFollowUp &&
         !intentSnapshot.call &&
         !intentSnapshot.text &&
         !intentSnapshot.desk &&
         !intentSnapshot.github &&
         !intentSnapshot.gym &&
         !intentSnapshot.qa &&
+        !intentSnapshot.cat &&
         !intentSnapshot.standup;
       const isTextMessageFollowUp =
         pendingTextMessage?.phase === "needs_message" &&
+        !isAckOnlyFollowUp &&
         !intentSnapshot.call &&
         !intentSnapshot.text &&
         !intentSnapshot.desk &&
         !intentSnapshot.github &&
         !intentSnapshot.gym &&
         !intentSnapshot.qa &&
+        !intentSnapshot.cat &&
         !intentSnapshot.standup;
+      const shouldHandleCatLocally =
+        Boolean(intentSnapshot.cat) &&
+        !intentSnapshot.call &&
+        !isPhoneCallFollowUp &&
+        !isTextMessageFollowUp;
 
       if (
         hasImmediateOfficeTrigger &&
@@ -2257,6 +2562,102 @@ export function OfficeScreen({
         );
       }
 
+      if (shouldHandleCatLocally) {
+        const nowMs = Date.now();
+        const runId = randomUUID();
+        dispatch({
+          type: "updateAgent",
+          agentId,
+          patch: {
+            draft: "",
+            lastUserMessage: trimmed,
+            lastActivityAt: nowMs,
+            queuedMessages: [],
+          },
+        });
+        dispatch({
+          type: "appendOutput",
+          agentId,
+          line: `> ${trimmed}`,
+          transcript: {
+            source: "local-send",
+            runId,
+            sessionKey,
+            timestampMs: nowMs,
+            role: "user",
+            kind: "user",
+            confirmed: true,
+          },
+        });
+        dispatch({
+          type: "appendOutput",
+          agentId,
+          line: buildCatLoungeOutputLine(
+            "Heading to the cat lounge for morale petting.",
+          ),
+          transcript: {
+            source: "local-send",
+            runId,
+            sessionKey,
+            timestampMs: nowMs + 1,
+            role: "assistant",
+            kind: "assistant",
+            confirmed: true,
+          },
+        });
+        return;
+      }
+
+      if (intentSnapshot.text || isTextMessageFollowUp) {
+        const nowMs = Date.now();
+        const runId = randomUUID();
+        dispatch({
+          type: "updateAgent",
+          agentId,
+          patch: {
+            draft: "",
+            lastUserMessage: trimmed,
+            lastActivityAt: nowMs,
+            queuedMessages: [],
+          },
+        });
+        dispatch({
+          type: "appendOutput",
+          agentId,
+          line: `> ${trimmed}`,
+          transcript: {
+            source: "local-send",
+            runId,
+            sessionKey,
+            timestampMs: nowMs,
+            role: "user",
+            kind: "user",
+            confirmed: true,
+          },
+        });
+        setOfficeTriggerState((previous) =>
+          reduceOfficeAnimationTriggerEvent({
+            state: previous,
+            agents: stateRef.current.agents,
+            nowMs,
+            event: {
+              type: "event",
+              event: "chat",
+              payload: {
+                runId,
+                sessionKey,
+                state: "final",
+                message: {
+                  role: "user",
+                  content: trimmed,
+                },
+              },
+            },
+          }),
+        );
+        return;
+      }
+
       if (intentSnapshot.call || isPhoneCallFollowUp) {
         const nowMs = Date.now();
         const runId = randomUUID();
@@ -2267,6 +2668,7 @@ export function OfficeScreen({
             draft: "",
             lastUserMessage: trimmed,
             lastActivityAt: nowMs,
+            queuedMessages: [],
           },
         });
         dispatch({
@@ -2461,6 +2863,7 @@ export function OfficeScreen({
       string,
       {
         agent: AgentState;
+        catHeld: boolean;
         deskHeld: boolean;
         gymHeld: boolean;
         latchedWorking: boolean;
@@ -2472,6 +2875,7 @@ export function OfficeScreen({
     >();
     const nextOfficeAgents = state.agents.map((agent) => {
       const latchedWorking = (workingUntilByAgentId[agent.agentId] ?? 0) > now;
+      const catHeld = Boolean(catHoldByAgentId[agent.agentId]);
       const deskHeld = Boolean(deskHoldByAgentId[agent.agentId]);
       const gymHeld = Boolean(gymHoldByAgentId[agent.agentId]);
       const phoneBoothHeld = Boolean(phoneBoothHoldByAgentId[agent.agentId]);
@@ -2482,6 +2886,7 @@ export function OfficeScreen({
         cached &&
         cached.agent === agent &&
         cached.latchedWorking === latchedWorking &&
+        cached.catHeld === catHeld &&
         cached.deskHeld === deskHeld &&
         cached.gymHeld === gymHeld &&
         cached.phoneBoothHeld === phoneBoothHeld &&
@@ -2498,14 +2903,21 @@ export function OfficeScreen({
               status: "running",
               runId: agent.runId ?? `latched-${agent.agentId}`,
             }
-          : (deskHeld || gymHeld || qaHeld || phoneBoothHeld || smsBoothHeld) &&
+          : (catHeld ||
+              deskHeld ||
+              gymHeld ||
+              qaHeld ||
+              phoneBoothHeld ||
+              smsBoothHeld) &&
               agent.status !== "error"
             ? {
                 ...agent,
                 status: "running",
                 runId:
                   agent.runId ??
-                  (qaHeld
+                  (catHeld
+                    ? `cat-hold-${agent.agentId}`
+                    : qaHeld
                     ? `qa-hold-${agent.agentId}`
                     : smsBoothHeld
                       ? `text-hold-${agent.agentId}`
@@ -2519,6 +2931,7 @@ export function OfficeScreen({
       const officeAgent = mapAgentToOffice(effectiveAgent);
       nextCache.set(agent.agentId, {
         agent,
+        catHeld,
         deskHeld,
         gymHeld,
         latchedWorking,
@@ -2529,9 +2942,24 @@ export function OfficeScreen({
       });
       return officeAgent;
     });
+    const hasRuntimeAnimalCompanion = nextOfficeAgents.some(
+      (agent) => agent.avatarKind === "cat" || agent.avatarKind === "animal",
+    );
+    if (!hasRuntimeAnimalCompanion) {
+      const hasActiveCatHold = Object.values(catHoldByAgentId).some(Boolean);
+      const seenSyntheticIds = new Set(nextOfficeAgents.map((agent) => agent.id));
+      for (const syntheticAnimal of syntheticCompanionAnimals) {
+        if (seenSyntheticIds.has(syntheticAnimal.id)) continue;
+        nextOfficeAgents.push({
+          ...syntheticAnimal,
+          status: hasActiveCatHold ? "working" : syntheticAnimal.status,
+        });
+      }
+    }
     officeAgentCacheRef.current = nextCache;
     return nextOfficeAgents;
   }, [
+    catHoldByAgentId,
     clockTick,
     deskHoldByAgentId,
     gymHoldByAgentId,
@@ -2539,6 +2967,7 @@ export function OfficeScreen({
     qaHoldByAgentId,
     smsBoothHoldByAgentId,
     state.agents,
+    syntheticCompanionAnimals,
     workingUntilByAgentId,
   ]);
   const openClawLiveStateText = useMemo(() => {
@@ -2697,6 +3126,63 @@ export function OfficeScreen({
       }) ?? null,
     [marketplace.skillsReport],
   );
+  const handleRemoveSyntheticCat = useCallback((agentId: string) => {
+    if (
+      (!agentId.startsWith(`${CAT_AGENT_ID_PREFIX}-`) &&
+        !agentId.startsWith(`${ANIMAL_AGENT_ID_PREFIX}-`)) ||
+      agentId === GARFIELD_COMPANION.agentId
+    ) {
+      return;
+    }
+    setSyntheticCompanionAnimals((previous) => {
+      const index = previous.findIndex((cat) => cat.id === agentId);
+      if (index < 0) return previous;
+      const removed = previous[index];
+      const next = previous.filter((cat) => cat.id !== agentId);
+      if (removed?.name) {
+        syntheticCatUsedNamesRef.current.delete(removed.name.toLowerCase());
+      }
+      if (removed) {
+        setZooRipPortraits((current) => {
+          const portrait: ZooRipPortrait = {
+            id: `rip-${removed.id}-${Date.now()}`,
+            name: removed.name,
+            species: removed.animalSpecies ?? "cat",
+            color:
+              removed.animalAppearance?.baseCoatColor ??
+              removed.catAppearance?.baseCoatColor ??
+              removed.color,
+            accentColor:
+              removed.animalAppearance?.accentCoatColor ??
+              removed.catAppearance?.accentCoatColor ??
+              "#f5f5f4",
+            createdAt: Date.now(),
+          };
+          return [...current, portrait].slice(-24);
+        });
+      }
+      syntheticCatSpawnedCountRef.current = Math.max(
+        0,
+        syntheticCatSpawnedCountRef.current - 1,
+      );
+      syntheticCatSpawnedTodayRef.current = Math.max(
+        0,
+        syntheticCatSpawnedTodayRef.current - 1,
+      );
+      return next;
+    });
+  }, []);
+  const handleCatTopiaSettingsChange = useCallback(
+    (patch: Partial<CatTopiaSettings>) => {
+      setCatTopiaSettings((previous) =>
+        normalizeCatTopiaSettings({
+          ...previous,
+          ...patch,
+        }),
+      );
+    },
+    [],
+  );
 
   if (
     !agentsLoaded &&
@@ -2739,6 +3225,7 @@ export function OfficeScreen({
   const runningCount = state.agents.filter(
     (agent) =>
       agent.status === "running" ||
+      catHoldByAgentId[agent.agentId] ||
       deskHoldByAgentId[agent.agentId] ||
       gymHoldByAgentId[agent.agentId] ||
       phoneBoothHoldByAgentId[agent.agentId] ||
@@ -2759,6 +3246,11 @@ export function OfficeScreen({
       <RetroOffice3D
         agents={officeAgents}
         animationState={officeAnimationState}
+        onRemoveSyntheticCat={handleRemoveSyntheticCat}
+        zooRipPortraits={zooRipPortraits}
+        catTopiaSettings={catTopiaSettings}
+        onCatTopiaSettingsChange={handleCatTopiaSettingsChange}
+        catHoldByAgentId={catHoldByAgentId}
         deskAssignmentByDeskUid={deskAssignmentByDeskUid}
         githubReviewAgentId={githubReviewAgentId}
         qaTestingAgentId={qaTestingAgentId}
