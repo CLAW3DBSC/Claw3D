@@ -6,6 +6,9 @@ type SettingsPanelProps = {
   gatewayStatus?: string;
   gatewayUrl?: string;
   onGatewayDisconnect?: () => void;
+  officeTitle: string;
+  officeTitleLoaded: boolean;
+  onOfficeTitleChange: (title: string) => void;
   voiceRepliesEnabled: boolean;
   voiceRepliesVoiceId: string | null;
   voiceRepliesSpeed: number;
@@ -20,6 +23,9 @@ export function SettingsPanel({
   gatewayStatus,
   gatewayUrl,
   onGatewayDisconnect,
+  officeTitle,
+  officeTitleLoaded,
+  onOfficeTitleChange,
   voiceRepliesEnabled,
   voiceRepliesVoiceId,
   voiceRepliesSpeed,
@@ -38,6 +44,31 @@ export function SettingsPanel({
   return (
     <div className="px-4 py-4">
       <div className="rounded-lg border border-cyan-500/10 bg-black/20 px-4 py-3">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-[11px] font-medium text-white">Studio title</div>
+            <div className="mt-1 text-[10px] text-white/75">
+              Customize the banner shown at the top of the office.
+            </div>
+          </div>
+          <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-cyan-200/70">
+            {officeTitleLoaded ? "Ready" : "Loading"}
+          </span>
+        </div>
+        <input
+          type="text"
+          value={officeTitle}
+          maxLength={48}
+          disabled={!officeTitleLoaded}
+          onChange={(event) => onOfficeTitleChange(event.target.value)}
+          placeholder="Luke Headquarters"
+          className="mt-3 w-full rounded-md border border-cyan-500/10 bg-black/25 px-3 py-2 text-[11px] uppercase tracking-[0.18em] text-cyan-100 outline-none transition-colors placeholder:text-cyan-100/30 focus:border-cyan-400/30 disabled:cursor-not-allowed disabled:opacity-50"
+        />
+        <div className="mt-2 text-[10px] text-white/50">
+          Used in the office scene header.
+        </div>
+      </div>
+      <div className="mt-3 rounded-lg border border-cyan-500/10 bg-black/20 px-4 py-3">
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="text-[11px] font-medium text-white">Gateway</div>

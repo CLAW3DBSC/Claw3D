@@ -1,6 +1,8 @@
 import { buildAgentMainSessionKey } from "@/lib/gateway/GatewayClient";
+import { createDefaultAgentAvatarProfile } from "@/lib/avatars/profile";
 import { resolveConfiguredModelKey, type GatewayModelPolicySnapshot } from "@/lib/gateway/models";
 import {
+  resolveAgentAvatarProfile,
   resolveAgentAvatarSeed,
   type StudioSettings,
   type StudioSettingsPublic,
@@ -203,9 +205,13 @@ export const deriveHydrateAgentFleetResult = (
 
   const needsSessionSettingsSync = new Set<string>();
   const seeds: AgentStoreSeed[] = input.agentsResult.agents.map((agent) => {
+    const defaultAvatarProfile = createDefaultAgentAvatarProfile(agent.id);
+    const persistedProfile =
+      input.settings && gatewayKey ? resolveAgentAvatarProfile(input.settings, gatewayKey, agent.id) : null;
     const persistedSeed =
       input.settings && gatewayKey ? resolveAgentAvatarSeed(input.settings, gatewayKey, agent.id) : null;
-    const avatarSeed = persistedSeed ?? agent.id;
+    const avatarProfile = persistedProfile ?? defaultAvatarProfile;
+    const avatarSeed = persistedSeed ?? avatarProfile.seed ?? agent.id;
     const avatarUrl = resolveAgentAvatarUrl(agent);
     const name = resolveAgentName(agent);
     const mainSession = input.mainSessionByAgentId.get(agent.id) ?? null;
@@ -247,6 +253,7 @@ export const deriveHydrateAgentFleetResult = (
       name,
       sessionKey: buildAgentMainSessionKey(agent.id, mainKey),
       avatarSeed,
+      avatarProfile,
       avatarUrl,
       model,
       thinkingLevel,

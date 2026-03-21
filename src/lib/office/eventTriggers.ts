@@ -1133,9 +1133,7 @@ export const reconcileOfficeAnimationTriggerState = (params: {
     });
     if (skillGymDirective) {
       skillGymDirectiveKeyByAgentId[agentId] = skillGymDirective.key;
-      if (skillGymDirective.directive !== "release") {
-        skillGymHoldByAgentId[agentId] = true;
-      }
+      skillGymHoldByAgentId[agentId] = true;
     } else if (next.skillGymHoldByAgentId[agentId]) {
       skillGymHoldByAgentId[agentId] = true;
     }

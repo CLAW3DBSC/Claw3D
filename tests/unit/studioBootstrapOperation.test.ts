@@ -166,6 +166,7 @@ describe("studioBootstrapOperation", () => {
         deskAssignments: {},
         analytics: {},
         voiceReplies: {},
+        office: {},
       }),
       isFocusFilterTouched: () => false,
     });
@@ -203,6 +204,7 @@ describe("studioBootstrapOperation", () => {
         deskAssignments: {},
         analytics: {},
         voiceReplies: {},
+        office: {},
       }),
       isFocusFilterTouched: () => true,
     });

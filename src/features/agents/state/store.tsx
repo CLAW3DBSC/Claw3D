@@ -8,6 +8,7 @@ import {
   useReducer,
   type ReactNode,
 } from "react";
+import type { AgentAvatarProfile } from "@/lib/avatars/profile";
 import {
   areTranscriptEntriesEqual,
   buildOutputLinesFromTranscriptEntries,
@@ -27,6 +28,7 @@ export type AgentStoreSeed = {
   name: string;
   sessionKey: string;
   avatarSeed?: string | null;
+  avatarProfile?: AgentAvatarProfile | null;
   avatarUrl?: string | null;
   model?: string | null;
   thinkingLevel?: string | null;
@@ -184,6 +186,7 @@ const createRuntimeAgentState = (
   return {
     ...seed,
     avatarSeed: seed.avatarSeed ?? existing?.avatarSeed ?? seed.agentId,
+    avatarProfile: seed.avatarProfile ?? existing?.avatarProfile ?? null,
     avatarUrl: seed.avatarUrl ?? existing?.avatarUrl ?? null,
     model: seed.model ?? existing?.model ?? null,
     thinkingLevel: seed.thinkingLevel ?? existing?.thinkingLevel ?? "high",

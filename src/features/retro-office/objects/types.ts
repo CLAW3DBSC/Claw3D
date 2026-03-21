@@ -1,3 +1,4 @@
+import type { AgentAvatarProfile } from "@/lib/avatars/profile";
 import type { RefObject } from "react";
 import type {
   FurnitureItem,
@@ -30,6 +31,7 @@ export type AgentModelProps = {
   name: string;
   status: OfficeAgent["status"];
   color: string;
+  appearance?: AgentAvatarProfile | null;
   agentsRef: RefObject<RenderAgent[]>;
   agentLookupRef?: RefObject<Map<string, RenderAgent>>;
   onHover?: (id: string) => void;

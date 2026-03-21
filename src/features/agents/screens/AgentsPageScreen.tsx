@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { AgentChatPanel } from "@/features/agents/components/AgentChatPanel";
+import { AgentAvatarCreatorModal } from "@/features/agents/components/AgentAvatarCreatorModal";
 import { AgentCreateModal } from "@/features/agents/components/AgentCreateModal";
 import {
   AgentBrainPanel,
@@ -45,6 +46,10 @@ import {
 } from "@/lib/gateway/agentConfig";
 import { buildAvatarDataUrl } from "@/lib/avatars/multiavatar";
 import { createStudioSettingsCoordinator } from "@/lib/studio/coordinator";
+import {
+  type AgentAvatarProfile,
+  createDefaultAgentAvatarProfile,
+} from "@/lib/avatars/profile";
 import { applySessionSettingMutation } from "@/features/agents/state/sessionSettingsMutations";
 import type { AgentCreateModalSubmitPayload } from "@/features/agents/creation/types";
 import {
@@ -267,6 +272,7 @@ const AgentsPageScreen = () => {
   const [createAgentModalError, setCreateAgentModalError] = useState<string | null>(null);
   const [mobilePane, setMobilePane] = useState<MobilePane>("chat");
   const [inspectSidebar, setInspectSidebar] = useState<InspectSidebarState>(null);
+  const [avatarCreatorAgentId, setAvatarCreatorAgentId] = useState<string | null>(null);
   const [systemInitialSkillKey, setSystemInitialSkillKey] = useState<string | null>(null);
   const [personalityHasUnsavedChanges, setPersonalityHasUnsavedChanges] = useState(false);
   const [settingsSidebarItem, setSettingsSidebarItem] = useState<SettingsSidebarItem>("personality");
@@ -308,6 +314,13 @@ const AgentsPageScreen = () => {
       : null;
     return selectedInFilter ?? filteredAgents[0] ?? null;
   }, [filteredAgents, selectedAgent]);
+  const avatarCreatorAgent = useMemo(
+    () =>
+      avatarCreatorAgentId
+        ? state.agents.find((entry) => entry.agentId === avatarCreatorAgentId) ?? null
+        : null,
+    [avatarCreatorAgentId, state.agents]
+  );
   const focusedAgentId = focusedAgent?.agentId ?? null;
   const focusedAgentRunning = focusedAgent?.status === "running";
   const focusedAgentStopDisabledReason = useMemo(() => {
@@ -892,17 +905,16 @@ const AgentsPageScreen = () => {
     setCreateAgentModalOpen(true);
   }, [createAgentBlock, createAgentBusy, restartingMutationBlock]);
 
-  const persistAvatarSeed = useCallback(
-    (agentId: string, avatarSeed: string) => {
+  const persistAvatarProfile = useCallback(
+    (agentId: string, profile: AgentAvatarProfile) => {
       const resolvedAgentId = agentId.trim();
-      const resolvedAvatarSeed = avatarSeed.trim();
       const key = gatewayUrl.trim();
-      if (!resolvedAgentId || !resolvedAvatarSeed || !key) return;
+      if (!resolvedAgentId || !key) return;
       settingsCoordinator.schedulePatch(
         {
           avatars: {
             [key]: {
-              [resolvedAgentId]: resolvedAvatarSeed,
+              [resolvedAgentId]: profile,
             },
           },
         },
@@ -928,7 +940,10 @@ const AgentsPageScreen = () => {
           createAgent: async (name, avatarSeed) => {
             const created = await createGatewayAgent({ client, name });
             if (avatarSeed) {
-              persistAvatarSeed(created.id, avatarSeed);
+              persistAvatarProfile(
+                created.id,
+                createDefaultAgentAvatarProfile(avatarSeed)
+              );
             }
             flushPendingDraft(focusedAgent?.agentId ?? null);
             focusFilterTouchedRef.current = true;
@@ -1013,7 +1028,7 @@ const AgentsPageScreen = () => {
       hasDeleteMutationBlock,
       hasRenameMutationBlock,
       loadAgents,
-      persistAvatarSeed,
+      persistAvatarProfile,
       refreshGatewayConfigSnapshot,
       setError,
       status,
@@ -1254,16 +1269,15 @@ const AgentsPageScreen = () => {
   ]);
 
   const handleAvatarShuffle = useCallback(
-    async (agentId: string) => {
-      const avatarSeed = randomUUID();
+    (agentId: string, profile: AgentAvatarProfile) => {
       dispatch({
         type: "updateAgent",
         agentId,
-        patch: { avatarSeed },
+        patch: { avatarProfile: profile, avatarSeed: profile.seed },
       });
-      persistAvatarSeed(agentId, avatarSeed);
+      persistAvatarProfile(agentId, profile);
     },
-    [dispatch, persistAvatarSeed]
+    [dispatch, persistAvatarProfile]
   );
 
   const connectionPanelVisible = showConnectionPanel;
@@ -1547,6 +1561,7 @@ const AgentsPageScreen = () => {
                         agents={agents}
                         selectedAgentId={inspectSidebarAgent.agentId}
                         onUnsavedChangesChange={setPersonalityHasUnsavedChanges}
+                        onRename={settingsMutationController.handleRenameAgent}
                       />
                     ) : (
                       <div className="h-full overflow-y-auto px-6 py-6">
@@ -1748,7 +1763,7 @@ const AgentsPageScreen = () => {
                           removeQueuedMessage(focusedAgent.agentId, index)
                         }
                         onStopRun={() => handleStopRun(focusedAgent.agentId, focusedAgent.sessionKey)}
-                        onAvatarShuffle={() => handleAvatarShuffle(focusedAgent.agentId)}
+                        onAvatarShuffle={() => setAvatarCreatorAgentId(focusedAgent.agentId)}
                         pendingExecApprovals={focusedPendingExecApprovals}
                         onResolveExecApproval={(id, decision) => {
                           void handleResolveExecApproval(id, decision);
@@ -1788,6 +1803,20 @@ const AgentsPageScreen = () => {
           }}
           onSubmit={(payload) => {
             void handleCreateAgentSubmit(payload);
+          }}
+        />
+      ) : null}
+      {avatarCreatorAgent ? (
+        <AgentAvatarCreatorModal
+          open
+          agentId={avatarCreatorAgent.agentId}
+          agentName={avatarCreatorAgent.name}
+          initialProfile={avatarCreatorAgent.avatarProfile}
+          onClose={() => {
+            setAvatarCreatorAgentId(null);
+          }}
+          onSave={(profile) => {
+            handleAvatarShuffle(avatarCreatorAgent.agentId, profile);
           }}
         />
       ) : null}

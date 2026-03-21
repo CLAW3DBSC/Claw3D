@@ -1,32 +1,13 @@
 import { expect, test } from "@playwright/test";
+import { stubStudioRoute } from "./helpers/studioRoute";
 
-test("loads focused studio empty state", async ({ page }) => {
-  await page.route("**/api/studio", async (route, request) => {
-    if (request.method() === "PUT") {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          settings: { version: 1, gateway: null, focused: {}, avatars: {} },
-        }),
-      });
-      return;
-    }
-    if (request.method() !== "GET") {
-      await route.fallback();
-      return;
-    }
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        settings: { version: 1, gateway: null, focused: {}, avatars: {} },
-      }),
-    });
-  });
-
+test("loads office shell from root", async ({ page }) => {
+  await stubStudioRoute(page);
   await page.goto("/");
 
-  await expect(page.getByTestId("studio-menu-toggle")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Connect" }).first()).toBeVisible();
+  await expect
+    .poll(() => new URL(page.url()).pathname)
+    .toBe("/office");
+  await expect(page.getByRole("button", { name: "Open headquarters sidebar" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "CHAT" })).toBeVisible();
 });

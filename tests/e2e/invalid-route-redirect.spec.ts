@@ -5,12 +5,12 @@ test.beforeEach(async ({ page }) => {
   await stubStudioRoute(page);
 });
 
-test("redirects unknown app routes to root", async ({ page }) => {
+test("redirects unknown app routes to office", async ({ page }) => {
   await page.goto("/not-a-real-route");
   await expect
     .poll(() => new URL(page.url()).pathname, {
-      message: "Expected invalid route to redirect to root path.",
+      message: "Expected invalid route to redirect to office path.",
     })
-    .toBe("/");
-  await expect(page.getByTestId("studio-menu-toggle")).toBeVisible();
+    .toBe("/office");
+  await expect(page.getByRole("button", { name: "Open headquarters sidebar" })).toBeVisible();
 });

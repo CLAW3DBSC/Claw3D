@@ -5,13 +5,10 @@ test.beforeEach(async ({ page }) => {
   await stubStudioRoute(page);
 });
 
-test("connection panel reflects disconnected state", async ({ page }) => {
+test("office settings panel reflects current gateway state", async ({ page }) => {
   await page.goto("/");
 
-  await page.getByTestId("studio-menu-toggle").click();
-  await page.getByTestId("gateway-settings-toggle").click();
-  await expect(page.getByLabel("Upstream URL")).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: /^(Connect|Disconnect)$/ })
-  ).toBeVisible();
+  await page.getByTitle("Voice reply settings").click();
+  await expect(page.getByRole("button", { name: "Disconnect gateway" })).toBeVisible();
+  await expect(page.getByText("Current studio connection and endpoint details.")).toBeVisible();
 });

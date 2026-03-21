@@ -1,9 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import type { AgentState } from "@/features/agents/state/store";
 import type { GatewayClient } from "@/lib/gateway/GatewayClient";
+import {
+  AGENT_FILE_META,
+  AGENT_FILE_PLACEHOLDERS,
+  type AgentFileName,
+} from "@/lib/agents/agentFiles";
 import { parsePersonalityFiles, serializePersonalityFiles } from "@/lib/agents/personalityBuilder";
 import { useAgentFilesEditor } from "@/features/agents/hooks/useAgentFilesEditor";
 
@@ -11,7 +16,10 @@ export type AgentBrainPanelProps = {
   client: GatewayClient;
   agents: AgentState[];
   selectedAgentId: string | null;
+  activeSection?: AgentFileName;
+  onCancel?: () => void;
   onUnsavedChangesChange?: (dirty: boolean) => void;
+  onRename?: (agentId: string, name: string) => Promise<boolean>;
 };
 
 const AgentBrainPanelSection = ({
@@ -31,7 +39,10 @@ export const AgentBrainPanel = ({
   client,
   agents,
   selectedAgentId,
+  activeSection,
+  onCancel,
   onUnsavedChangesChange,
+  onRename,
 }: AgentBrainPanelProps) => {
   const selectedAgent = useMemo(
     () =>
@@ -49,9 +60,9 @@ export const AgentBrainPanel = ({
     agentFilesError,
     setAgentFileContent,
     saveAgentFiles,
-    discardAgentFileChanges,
   } = useAgentFilesEditor({ client, agentId: selectedAgent?.agentId ?? null });
   const draft = useMemo(() => parsePersonalityFiles(agentFiles), [agentFiles]);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const setIdentityField = useCallback(
     (field: "name" | "creature" | "vibe" | "emoji" | "avatar", value: string) => {
@@ -65,8 +76,29 @@ export const AgentBrainPanel = ({
 
   const handleSave = useCallback(async () => {
     if (agentFilesLoading || agentFilesSaving || !agentFilesDirty) return;
-    await saveAgentFiles();
-  }, [agentFilesDirty, agentFilesLoading, agentFilesSaving, saveAgentFiles]);
+    setSaveError(null);
+    const saved = await saveAgentFiles();
+    if (!saved || !selectedAgent || !onRename) {
+      return;
+    }
+    const nextName = draft.identity.name.trim();
+    const currentName = selectedAgent.name.trim();
+    if (!nextName || nextName === currentName) {
+      return;
+    }
+    const renamed = await onRename(selectedAgent.agentId, nextName);
+    if (!renamed) {
+      setSaveError("Saved IDENTITY.md, but could not rename the live agent.");
+    }
+  }, [
+    agentFilesDirty,
+    agentFilesLoading,
+    agentFilesSaving,
+    draft.identity.name,
+    onRename,
+    saveAgentFiles,
+    selectedAgent,
+  ]);
 
   useEffect(() => {
     onUnsavedChangesChange?.(agentFilesDirty);
@@ -77,6 +109,102 @@ export const AgentBrainPanel = ({
       onUnsavedChangesChange?.(false);
     };
   }, [onUnsavedChangesChange]);
+
+  const renderMarkdownEditor = useCallback(
+    (name: Exclude<AgentFileName, "IDENTITY.md">) => (
+      <AgentBrainPanelSection title={AGENT_FILE_META[name].title}>
+        <div className="text-xs text-muted-foreground">{AGENT_FILE_META[name].hint}</div>
+        <textarea
+          aria-label={AGENT_FILE_META[name].title}
+          className="h-[min(56vh,480px)] w-full resize-y rounded-md border border-border/80 bg-background px-4 py-3 font-mono text-sm leading-6 text-foreground outline-none"
+          value={agentFiles[name].content}
+          placeholder={AGENT_FILE_PLACEHOLDERS[name]}
+          disabled={agentFilesLoading || agentFilesSaving}
+          onChange={(event) => {
+            setAgentFileContent(name, event.target.value);
+          }}
+        />
+      </AgentBrainPanelSection>
+    ),
+    [agentFiles, agentFilesLoading, agentFilesSaving, setAgentFileContent],
+  );
+
+  const renderIdentityEditor = useCallback(
+    () => (
+      <section className="space-y-3 border-t border-border/55 pt-8 first:border-t-0 first:pt-0">
+        <h3 className="text-sm font-medium text-foreground">{AGENT_FILE_META["IDENTITY.md"].title}</h3>
+        <div className="text-xs text-muted-foreground">
+          {AGENT_FILE_META["IDENTITY.md"].hint}
+        </div>
+        <div className="text-xs text-muted-foreground">
+          Changing <span className="font-medium text-foreground">Name</span> here also renames the live agent
+          when you save.
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <label className="flex flex-col gap-2 text-xs text-muted-foreground">
+            Name
+            <input
+              className="h-10 rounded-md border border-border/80 bg-background px-3 text-sm text-foreground outline-none"
+              value={draft.identity.name}
+              disabled={agentFilesLoading || agentFilesSaving}
+              onChange={(event) => {
+                setIdentityField("name", event.target.value);
+              }}
+            />
+          </label>
+          <label className="flex flex-col gap-2 text-xs text-muted-foreground">
+            Creature
+            <input
+              className="h-10 rounded-md border border-border/80 bg-background px-3 text-sm text-foreground outline-none"
+              value={draft.identity.creature}
+              disabled={agentFilesLoading || agentFilesSaving}
+              onChange={(event) => {
+                setIdentityField("creature", event.target.value);
+              }}
+            />
+          </label>
+          <label className="flex flex-col gap-2 text-xs text-muted-foreground">
+            Vibe
+            <input
+              className="h-10 rounded-md border border-border/80 bg-background px-3 text-sm text-foreground outline-none"
+              value={draft.identity.vibe}
+              disabled={agentFilesLoading || agentFilesSaving}
+              onChange={(event) => {
+                setIdentityField("vibe", event.target.value);
+              }}
+            />
+          </label>
+          <label className="flex flex-col gap-2 text-xs text-muted-foreground">
+            Emoji
+            <input
+              className="h-10 rounded-md border border-border/80 bg-background px-3 text-sm text-foreground outline-none"
+              value={draft.identity.emoji}
+              disabled={agentFilesLoading || agentFilesSaving}
+              onChange={(event) => {
+                setIdentityField("emoji", event.target.value);
+              }}
+            />
+          </label>
+        </div>
+      </section>
+    ),
+    [agentFilesLoading, agentFilesSaving, draft.identity, setIdentityField],
+  );
+
+  const renderedSections = useMemo(() => {
+    if (activeSection === "IDENTITY.md") {
+      return [renderIdentityEditor()];
+    }
+    if (activeSection) {
+      return [renderMarkdownEditor(activeSection as Exclude<AgentFileName, "IDENTITY.md">)];
+    }
+    return [
+      renderMarkdownEditor("SOUL.md"),
+      renderMarkdownEditor("AGENTS.md"),
+      renderMarkdownEditor("USER.md"),
+      renderIdentityEditor(),
+    ];
+  }, [activeSection, renderIdentityEditor, renderMarkdownEditor]);
 
   return (
     <div
@@ -94,19 +222,24 @@ export const AgentBrainPanel = ({
               {agentFilesError}
             </div>
           ) : null}
+          {saveError ? (
+            <div className="ui-alert-danger mb-4 rounded-md px-3 py-2 text-xs">
+              {saveError}
+            </div>
+          ) : null}
 
-          <div className="mb-6 flex items-center justify-end gap-2">
+          <div className="mb-6 flex items-center justify-end gap-2 border-b border-border/40 pb-4">
             <button
               type="button"
-              className="ui-btn-secondary px-3 py-1 font-mono text-[10px] font-semibold tracking-[0.06em] disabled:opacity-50"
-              disabled={agentFilesLoading || agentFilesSaving || !agentFilesDirty}
-              onClick={discardAgentFileChanges}
+              className="ui-btn-ghost px-3 py-2 text-xs"
+              disabled={agentFilesLoading || agentFilesSaving}
+              onClick={onCancel}
             >
-              Discard
+              Cancel
             </button>
             <button
               type="button"
-              className="ui-btn-primary px-3 py-1 font-mono text-[10px] font-semibold tracking-[0.06em] disabled:cursor-not-allowed disabled:border-border disabled:bg-muted disabled:text-muted-foreground"
+              className="ui-btn-primary px-3 py-2 text-xs disabled:cursor-not-allowed disabled:border-border disabled:bg-muted disabled:text-muted-foreground"
               disabled={agentFilesLoading || agentFilesSaving || !agentFilesDirty}
               onClick={() => {
                 void handleSave();
@@ -116,104 +249,7 @@ export const AgentBrainPanel = ({
             </button>
           </div>
 
-          <div className="space-y-8 pb-8">
-            <AgentBrainPanelSection title="Persona">
-              <textarea
-                aria-label="Persona"
-                className="h-56 w-full resize-y rounded-md border border-border/80 bg-background px-4 py-3 font-mono text-sm leading-6 text-foreground outline-none"
-                value={agentFiles["SOUL.md"].content}
-                disabled={agentFilesLoading || agentFilesSaving}
-                onChange={(event) => {
-                  setAgentFileContent("SOUL.md", event.target.value);
-                }}
-              />
-            </AgentBrainPanelSection>
-
-            <AgentBrainPanelSection title="Directives">
-              <textarea
-                aria-label="Directives"
-                className="h-56 w-full resize-y rounded-md border border-border/80 bg-background px-4 py-3 font-mono text-sm leading-6 text-foreground outline-none"
-                value={agentFiles["AGENTS.md"].content}
-                disabled={agentFilesLoading || agentFilesSaving}
-                onChange={(event) => {
-                  setAgentFileContent("AGENTS.md", event.target.value);
-                }}
-              />
-            </AgentBrainPanelSection>
-
-            <AgentBrainPanelSection title="Context">
-              <textarea
-                aria-label="Context"
-                className="h-56 w-full resize-y rounded-md border border-border/80 bg-background px-4 py-3 font-mono text-sm leading-6 text-foreground outline-none"
-                value={agentFiles["USER.md"].content}
-                disabled={agentFilesLoading || agentFilesSaving}
-                onChange={(event) => {
-                  setAgentFileContent("USER.md", event.target.value);
-                }}
-              />
-            </AgentBrainPanelSection>
-
-            <section className="space-y-3 border-t border-border/55 pt-8">
-              <h3 className="text-sm font-medium text-foreground">Identity</h3>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <label className="flex flex-col gap-2 text-xs text-muted-foreground">
-                  Name
-                  <input
-                    className="h-10 rounded-md border border-border/80 bg-background px-3 text-sm text-foreground outline-none"
-                    value={draft.identity.name}
-                    disabled={agentFilesLoading || agentFilesSaving}
-                    onChange={(event) => {
-                      setIdentityField("name", event.target.value);
-                    }}
-                  />
-                </label>
-                <label className="flex flex-col gap-2 text-xs text-muted-foreground">
-                  Creature
-                  <input
-                    className="h-10 rounded-md border border-border/80 bg-background px-3 text-sm text-foreground outline-none"
-                    value={draft.identity.creature}
-                    disabled={agentFilesLoading || agentFilesSaving}
-                    onChange={(event) => {
-                      setIdentityField("creature", event.target.value);
-                    }}
-                  />
-                </label>
-                <label className="flex flex-col gap-2 text-xs text-muted-foreground">
-                  Vibe
-                  <input
-                    className="h-10 rounded-md border border-border/80 bg-background px-3 text-sm text-foreground outline-none"
-                    value={draft.identity.vibe}
-                    disabled={agentFilesLoading || agentFilesSaving}
-                    onChange={(event) => {
-                      setIdentityField("vibe", event.target.value);
-                    }}
-                  />
-                </label>
-                <label className="flex flex-col gap-2 text-xs text-muted-foreground">
-                  Emoji
-                  <input
-                    className="h-10 rounded-md border border-border/80 bg-background px-3 text-sm text-foreground outline-none"
-                    value={draft.identity.emoji}
-                    disabled={agentFilesLoading || agentFilesSaving}
-                    onChange={(event) => {
-                      setIdentityField("emoji", event.target.value);
-                    }}
-                  />
-                </label>
-              </div>
-              <label className="flex flex-col gap-2 text-xs text-muted-foreground">
-                Avatar
-                <input
-                  className="h-10 rounded-md border border-border/80 bg-background px-3 text-sm text-foreground outline-none"
-                  value={draft.identity.avatar}
-                  disabled={agentFilesLoading || agentFilesSaving}
-                  onChange={(event) => {
-                    setIdentityField("avatar", event.target.value);
-                  }}
-                />
-              </label>
-            </section>
-          </div>
+          <div className="space-y-8 pb-8">{renderedSections}</div>
         </section>
       </div>
     </div>

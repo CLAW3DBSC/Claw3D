@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { createDefaultAgentAvatarProfile } from "@/lib/avatars/profile";
 
 import {
   mergeStudioSettings,
@@ -12,6 +13,7 @@ describe("studio settings normalization", () => {
     expect(normalized.gateway).toBeNull();
     expect(normalized.focused).toEqual({});
     expect(normalized.avatars).toEqual({});
+    expect(normalized.office).toEqual({});
   });
 
   it("normalizes gateway entries", () => {
@@ -114,16 +116,17 @@ describe("studio settings normalization", () => {
       },
     });
 
-    expect(normalized.avatars["ws://localhost:18789"]).toEqual({
-      "agent-1": "seed-1",
-    });
+    expect(normalized.avatars["ws://localhost:18789"]?.["agent-1"]?.seed).toBe("seed-1");
   });
 
   it("merges avatar patches", () => {
+    const firstProfile = createDefaultAgentAvatarProfile("seed-1");
+    const replacementProfile = createDefaultAgentAvatarProfile("seed-2");
+    const secondProfile = createDefaultAgentAvatarProfile("seed-3");
     const current = normalizeStudioSettings({
       avatars: {
         "ws://localhost:18789": {
-          "agent-1": "seed-1",
+          "agent-1": firstProfile,
         },
       },
     });
@@ -131,15 +134,55 @@ describe("studio settings normalization", () => {
     const merged = mergeStudioSettings(current, {
       avatars: {
         "ws://localhost:18789": {
-          "agent-1": "seed-2",
-          "agent-2": "seed-3",
+          "agent-1": replacementProfile,
+          "agent-2": secondProfile,
         },
       },
     });
 
-    expect(merged.avatars["ws://localhost:18789"]).toEqual({
-      "agent-1": "seed-2",
-      "agent-2": "seed-3",
+    expect(merged.avatars["ws://localhost:18789"]?.["agent-1"]?.seed).toBe("seed-2");
+    expect(merged.avatars["ws://localhost:18789"]?.["agent-2"]?.seed).toBe("seed-3");
+  });
+
+  it("normalizes office title preferences per gateway", () => {
+    const normalized = normalizeStudioSettings({
+      office: {
+        " ws://localhost:18789 ": {
+          title: "  Team Orbit  ",
+        },
+        bad: {
+          title: "",
+        },
+      },
+    });
+
+    expect(normalized.office["ws://localhost:18789"]).toEqual({
+      title: "Team Orbit",
+    });
+    expect(normalized.office.bad).toEqual({
+      title: "Luke Headquarters",
+    });
+  });
+
+  it("merges office title patches", () => {
+    const current = normalizeStudioSettings({
+      office: {
+        "ws://localhost:18789": {
+          title: "Luke Headquarters",
+        },
+      },
+    });
+
+    const merged = mergeStudioSettings(current, {
+      office: {
+        "ws://localhost:18789": {
+          title: "Orbit Control",
+        },
+      },
+    });
+
+    expect(merged.office["ws://localhost:18789"]).toEqual({
+      title: "Orbit Control",
     });
   });
 });

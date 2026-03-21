@@ -5,11 +5,14 @@ test.beforeEach(async ({ page }) => {
   await stubStudioRoute(page);
 });
 
-test("shows_disconnected_connect_surface", async ({ page }) => {
+test("shows_office_shell_from_root_redirect", async ({ page }) => {
   await page.goto("/");
 
-  await expect(page.getByLabel("Upstream URL")).toBeVisible();
-  await expect(page.getByRole("button", { name: /^(Connect|Connecting…)$/ })).toBeVisible();
+  await expect
+    .poll(() => new URL(page.url()).pathname)
+    .toBe("/office");
+  await expect(page.getByRole("button", { name: "Open headquarters sidebar" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "CHAT" })).toBeVisible();
 });
 
 test("persists_gateway_fields_to_studio_settings", async ({ page }) => {
@@ -35,17 +38,20 @@ test("persists_gateway_fields_to_studio_settings", async ({ page }) => {
 test("focused_preferences_persist_across_reload", async ({ page }) => {
   await page.goto("/");
 
-  await page.getByTestId("studio-menu-toggle").click();
-  await expect(page.getByTestId("gateway-settings-toggle")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open headquarters sidebar" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "CHAT" })).toBeVisible();
 
   await page.reload();
 
-  await expect(page.getByTestId("studio-menu-toggle")).toBeVisible();
+  await expect
+    .poll(() => new URL(page.url()).pathname)
+    .toBe("/office");
+  await expect(page.getByRole("button", { name: "Open headquarters sidebar" })).toBeVisible();
 });
 
-test("clears_unseen_indicator_on_focus", async ({ page }) => {
+test("shows_chat_entrypoint_in_office_shell", async ({ page }) => {
   await page.goto("/");
 
-  await page.getByTestId("studio-menu-toggle").click();
-  await expect(page.getByTestId("gateway-settings-toggle")).toBeVisible();
+  await expect(page.getByRole("button", { name: "CHAT" })).toBeVisible();
+  await expect(page.getByTitle("Voice reply settings")).toBeVisible();
 });

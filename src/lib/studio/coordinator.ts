@@ -1,8 +1,10 @@
 import { fetchJson } from "@/lib/http";
+import type { AgentAvatarProfile } from "@/lib/avatars/profile";
 import type {
   StudioAnalyticsPreferencePatch,
   StudioFocusedPreference,
   StudioGatewaySettingsPublic,
+  StudioOfficePreferencePatch,
   StudioSettingsPublic,
   StudioSettingsPatch,
   StudioStandupPreferencePatch,
@@ -20,10 +22,11 @@ export type StudioSettingsLoadOptions = {
 };
 
 type FocusedPatch = Record<string, Partial<StudioFocusedPreference> | null>;
-type AvatarsPatch = Record<string, Record<string, string | null> | null>;
+type AvatarsPatch = Record<string, Record<string, AgentAvatarProfile | null> | null>;
 type DeskAssignmentsPatch = Record<string, Record<string, string | null> | null>;
 type AnalyticsPatch = Record<string, StudioAnalyticsPreferencePatch | null>;
 type VoiceRepliesPatch = Record<string, StudioVoiceRepliesPreferencePatch | null>;
+type OfficePatch = Record<string, StudioOfficePreferencePatch | null>;
 type StandupPatch = Record<string, StudioStandupPreferencePatch | null>;
 
 export type StudioSettingsCoordinatorTransport = {
@@ -143,6 +146,30 @@ const mergeVoiceRepliesPatch = (
   return merged;
 };
 
+const mergeOfficePatch = (
+  current: OfficePatch | undefined,
+  next: OfficePatch | undefined
+): OfficePatch | undefined => {
+  if (!current && !next) return undefined;
+  const merged: OfficePatch = { ...(current ?? {}) };
+  for (const [gatewayKey, value] of Object.entries(next ?? {})) {
+    if (value === null) {
+      merged[gatewayKey] = null;
+      continue;
+    }
+    const existing = merged[gatewayKey];
+    if (existing && existing !== null) {
+      merged[gatewayKey] = {
+        ...existing,
+        ...value,
+      };
+      continue;
+    }
+    merged[gatewayKey] = { ...value };
+  }
+  return merged;
+};
+
 const mergeStandupPatch = (
   current: StandupPatch | undefined,
   next: StandupPatch | undefined
@@ -210,6 +237,7 @@ const mergeStudioPatch = (
       ...(next.deskAssignments ? { deskAssignments: { ...next.deskAssignments } } : {}),
       ...(next.analytics ? { analytics: { ...next.analytics } } : {}),
       ...(next.voiceReplies ? { voiceReplies: { ...next.voiceReplies } } : {}),
+      ...(next.office ? { office: { ...next.office } } : {}),
       ...(next.standup ? { standup: { ...next.standup } } : {}),
     };
   }
@@ -221,6 +249,7 @@ const mergeStudioPatch = (
   );
   const analytics = mergeAnalyticsPatch(current.analytics, next.analytics);
   const voiceReplies = mergeVoiceRepliesPatch(current.voiceReplies, next.voiceReplies);
+  const office = mergeOfficePatch(current.office, next.office);
   const standup = mergeStandupPatch(current.standup, next.standup);
   return {
     ...(next.gateway !== undefined
@@ -233,6 +262,7 @@ const mergeStudioPatch = (
     ...(deskAssignments ? { deskAssignments } : {}),
     ...(analytics ? { analytics } : {}),
     ...(voiceReplies ? { voiceReplies } : {}),
+    ...(office ? { office } : {}),
     ...(standup ? { standup } : {}),
   };
 };

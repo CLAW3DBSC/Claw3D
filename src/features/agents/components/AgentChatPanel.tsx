@@ -13,7 +13,7 @@ import {
 import type { AgentState as AgentRecord } from "@/features/agents/state/store";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Check, ChevronRight, Clock, Cog, Mic, Pencil, Shuffle, Square, Trash2, X } from "lucide-react";
+import { Check, ChevronRight, Clock, Cog, Mic, Pencil, Square, Trash2, X } from "lucide-react";
 import type { GatewayModelChoice } from "@/lib/gateway/models";
 import { rewriteMediaLinesToMarkdown } from "@/lib/text/media-markdown";
 import { normalizeAssistantDisplayText } from "@/lib/text/assistantText";
@@ -1481,15 +1481,15 @@ export const AgentChatPanel = ({
                 className="nodrag ui-btn-icon ui-btn-icon-xs agent-avatar-shuffle-btn absolute bottom-0 right-0"
                 style={{ "--ui-btn-icon-size": "1.1rem" } as React.CSSProperties}
                 type="button"
-                aria-label="Shuffle avatar"
-                data-testid="agent-avatar-shuffle"
+                aria-label="Customize avatar"
+                data-testid="agent-avatar-customize"
                 onClick={(event) => {
                   event.preventDefault();
                   event.stopPropagation();
                   onAvatarShuffle();
                 }}
               >
-                <Shuffle className="h-2 w-2" />
+                <Pencil className="h-2 w-2" />
               </button>
             </div>
 

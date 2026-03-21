@@ -1,9 +1,12 @@
+import type { AgentAvatarProfile } from "@/lib/avatars/profile";
+
 export type OfficeAgent = {
   id: string;
   name: string;
   status: "working" | "idle" | "error";
   color: string;
   item: string;
+  avatarProfile?: AgentAvatarProfile | null;
 };
 
 export type JanitorTool = "broom" | "vacuum" | "floor_scrubber";

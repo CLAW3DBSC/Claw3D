@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { hydrateAgentFleetFromGateway } from "@/features/agents/operations/agentFleetHydration";
+import { createDefaultAgentAvatarProfile } from "@/lib/avatars/profile";
 import type { StudioSettings } from "@/lib/studio/settings";
 
 describe("hydrateAgentFleetFromGateway", () => {
@@ -13,12 +14,13 @@ describe("hydrateAgentFleetFromGateway", () => {
       focused: {},
       avatars: {
         [gatewayUrl]: {
-          "agent-1": "persisted-seed",
+          "agent-1": createDefaultAgentAvatarProfile("persisted-seed"),
         },
       },
       deskAssignments: {},
       analytics: {},
       voiceReplies: {},
+      office: {},
     };
 
     const call = vi.fn(async (method: string, params: unknown) => {
@@ -127,6 +129,7 @@ describe("hydrateAgentFleetFromGateway", () => {
         name: "One",
         sessionKey: "agent:agent-1:main",
         avatarSeed: "persisted-seed",
+        avatarProfile: expect.objectContaining({ seed: "persisted-seed" }),
         avatarUrl: "https://example.com/one.png",
         model: "openai/gpt-4.1",
         thinkingLevel: "medium",

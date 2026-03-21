@@ -25,6 +25,7 @@ import {
   type StudioSettingsLoadOptions,
 } from "@/lib/studio/coordinator";
 import { resolveDeskAssignments } from "@/lib/studio/settings";
+import { renameGatewayAgent } from "@/lib/gateway/agentConfig";
 import {
   runStudioBootstrapLoadOperation,
   executeStudioBootstrapLoadCommands,
@@ -48,6 +49,10 @@ import {
 } from "@/lib/text/message-extract";
 import { resolveOfficeIntentSnapshot } from "@/lib/office/deskDirectives";
 import { AgentChatPanel } from "@/features/agents/components/AgentChatPanel";
+import {
+  AgentEditorModal,
+  type AgentEditorSection,
+} from "@/features/agents/components/AgentEditorModal";
 import { useChatInteractionController } from "@/features/agents/operations/useChatInteractionController";
 import {
   executeHistorySyncCommands,
@@ -66,6 +71,7 @@ import {
   type GatewayModelChoice,
 } from "@/lib/gateway/models";
 import type { GatewayModelPolicySnapshot } from "@/lib/gateway/models";
+import type { AgentAvatarProfile } from "@/lib/avatars/profile";
 import { randomUUID } from "@/lib/uuid";
 import {
   HQSidebar,
@@ -80,6 +86,7 @@ import { useOfficeSkillsMarketplace } from "@/features/office/hooks/useOfficeSki
 import { useOfficeStandupController } from "@/features/office/hooks/useOfficeStandupController";
 import { useRunLog } from "@/features/office/hooks/useRunLog";
 import { useFinalizedAssistantReplyListener } from "@/hooks/useFinalizedAssistantReplyListener";
+import { useStudioOfficePreference } from "@/hooks/useStudioOfficePreference";
 import { useStudioVoiceRepliesPreference } from "@/hooks/useStudioVoiceRepliesPreference";
 import {
   useVoiceRecorder,
@@ -370,6 +377,7 @@ const mapAgentToOffice = (agent: AgentState): OfficeAgent => {
       status: "error",
       color: stringToColor(agent.agentId),
       item: getDeterministicItem(agent.agentId),
+      avatarProfile: agent.avatarProfile ?? null,
     };
   }
   const isWorking = agent.status === "running" || Boolean(agent.runId);
@@ -379,6 +387,7 @@ const mapAgentToOffice = (agent: AgentState): OfficeAgent => {
     status: isWorking ? "working" : "idle",
     color: stringToColor(agent.agentId),
     item: getDeterministicItem(agent.agentId),
+    avatarProfile: agent.avatarProfile ?? null,
   };
 };
 
@@ -628,7 +637,13 @@ const inferRunningFromAgentSessions = async (params: {
   };
 };
 
-export function OfficeScreen() {
+type OfficeScreenProps = {
+  showOpenClawConsole?: boolean;
+};
+
+export function OfficeScreen({
+  showOpenClawConsole = true,
+}: OfficeScreenProps) {
   const searchParams = useSearchParams();
   const debugEnabled = searchParams.get("officeDebug") === "1";
   const [settingsCoordinator] = useState(() =>
@@ -679,7 +694,7 @@ export function OfficeScreen() {
     OpenClawLogEntry[]
   >([]);
   const [openClawConsoleCollapsed, setOpenClawConsoleCollapsed] =
-    useState(false);
+    useState(true);
   const [openClawConsoleSearch, setOpenClawConsoleSearch] = useState("");
   const [openClawConsoleCopyStatus, setOpenClawConsoleCopyStatus] = useState<
     "idle" | "copied" | "error"
@@ -721,6 +736,9 @@ export function OfficeScreen() {
   const [selectedChatAgentId, setSelectedChatAgentId] = useState<string | null>(
     null,
   );
+  const [agentEditorAgentId, setAgentEditorAgentId] = useState<string | null>(null);
+  const [agentEditorInitialSection, setAgentEditorInitialSection] =
+    useState<AgentEditorSection>("avatar");
   const [preparedPhoneCallsByAgentId, setPreparedPhoneCallsByAgentId] = useState<
     Record<string, PreparedPhoneCallEntry>
   >({});
@@ -740,6 +758,14 @@ export function OfficeScreen() {
   const [activeSidebarTab, setActiveSidebarTab] =
     useState<HQSidebarTab>("inbox");
   const router = useRouter();
+  const {
+    loaded: officeTitleLoaded,
+    title: officeTitle,
+    setTitle: setOfficeTitle,
+  } = useStudioOfficePreference({
+    gatewayUrl,
+    settingsCoordinator,
+  });
   const {
     loaded: voiceRepliesLoaded,
     preference: voiceRepliesPreference,
@@ -764,19 +790,30 @@ export function OfficeScreen() {
     speed: voiceRepliesPreference.speed,
   });
 
-  const handleAvatarShuffle = useCallback(
-    (agentId: string) => {
-      const seed = randomUUID();
-      dispatch({ type: "updateAgent", agentId, patch: { avatarSeed: seed } });
+  const handleAvatarProfileSave = useCallback(
+    (agentId: string, profile: AgentAvatarProfile) => {
+      dispatch({
+        type: "updateAgent",
+        agentId,
+        patch: { avatarProfile: profile, avatarSeed: profile.seed },
+      });
       const key = gatewayUrl.trim();
-      if (key) {
-        settingsCoordinator.schedulePatch(
-          { avatars: { [key]: { [agentId]: seed } } },
-          0,
-        );
-      }
+      if (!key) return;
+      settingsCoordinator.schedulePatch(
+        { avatars: { [key]: { [agentId]: profile } } },
+        0,
+      );
     },
     [dispatch, gatewayUrl, settingsCoordinator],
+  );
+  const openAgentEditor = useCallback(
+    (agentId: string, initialSection: AgentEditorSection = "avatar") => {
+      setAgentEditorAgentId(agentId);
+      setAgentEditorInitialSection(initialSection);
+      setSelectedChatAgentId(agentId);
+      dispatch({ type: "selectAgent", agentId });
+    },
+    [dispatch],
   );
 
   const handleDeskAssignmentChange = useCallback(
@@ -1603,6 +1640,9 @@ export function OfficeScreen() {
   const focusedChatAgent = selectedChatAgentId
     ? (state.agents.find((agent) => agent.agentId === selectedChatAgentId) ??
       null)
+    : null;
+  const agentEditorAgent = agentEditorAgentId
+    ? (state.agents.find((agent) => agent.agentId === agentEditorAgentId) ?? null)
     : null;
   const mainAgent =
     state.agents.find((agent) => agent.agentId === MAIN_AGENT_ID) ?? null;
@@ -2715,10 +2755,13 @@ export function OfficeScreen() {
         monitorAgentId={monitorAgentId}
         monitorByAgentId={monitorByAgentId}
         githubSkill={githubSkill}
+        officeTitle={officeTitle}
+        officeTitleLoaded={officeTitleLoaded}
         voiceRepliesEnabled={voiceRepliesEnabled}
         voiceRepliesVoiceId={voiceRepliesVoiceId}
         voiceRepliesSpeed={voiceRepliesSpeed}
         voiceRepliesLoaded={voiceRepliesLoaded}
+        onOfficeTitleChange={setOfficeTitle}
         onVoiceRepliesToggle={setVoiceRepliesEnabled}
         onVoiceRepliesVoiceChange={setVoiceRepliesVoiceId}
         onVoiceRepliesSpeedChange={setVoiceRepliesSpeed}
@@ -2761,6 +2804,9 @@ export function OfficeScreen() {
             setSelectedChatAgentId(agentId);
             dispatch({ type: "selectAgent", agentId });
           }
+        }}
+        onAgentEdit={(agentId) => {
+          openAgentEditor(agentId, "avatar");
         }}
         onDeskAssignmentChange={handleDeskAssignmentChange}
         onDeskAssignmentsReset={handleDeskAssignmentsReset}
@@ -2864,54 +2910,55 @@ export function OfficeScreen() {
         />
       ) : null}
 
-      <section className="pointer-events-auto fixed bottom-3 left-3 z-30 flex w-[520px] max-w-[calc(100vw-1.5rem)] flex-col overflow-hidden rounded border border-cyan-500/25 bg-black/78 shadow-2xl backdrop-blur">
-        <div className="flex items-center justify-between border-b border-cyan-500/15 px-3 py-2 font-mono text-[11px] uppercase tracking-[0.18em] text-cyan-200/80">
-          <span>OpenClaw Event Console</span>
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] text-cyan-100/45">
-              agents {state.agents.length} | events{" "}
-              {filteredOpenClawLogEntries.length}/{openClawLogEntries.length}
-            </span>
-            <button
-              type="button"
-              onClick={() => {
-                void handleCopyOpenClawConsoleJson();
-              }}
-              className="rounded border border-cyan-500/20 px-2 py-0.5 text-[9px] text-cyan-100/70 transition-colors hover:border-cyan-400/45 hover:text-cyan-50"
-            >
-              {openClawConsoleCopyStatus === "copied"
-                ? "Copied"
-                : openClawConsoleCopyStatus === "error"
-                  ? "Copy Failed"
-                  : "Copy JSON"}
-            </button>
-            <button
-              type="button"
-              onClick={handleDownloadOpenClawConsoleJson}
-              className="rounded border border-cyan-500/20 px-2 py-0.5 text-[9px] text-cyan-100/70 transition-colors hover:border-cyan-400/45 hover:text-cyan-50"
-            >
-              Download JSON
-            </button>
-            <button
-              type="button"
-              onClick={handleClearOpenClawConsole}
-              className="rounded border border-cyan-500/20 px-2 py-0.5 text-[9px] text-cyan-100/70 transition-colors hover:border-cyan-400/45 hover:text-cyan-50"
-            >
-              Clear
-            </button>
-            <button
-              type="button"
-              onClick={() =>
-                setOpenClawConsoleCollapsed((previous) => !previous)
-              }
-              className="rounded border border-cyan-500/20 px-2 py-0.5 text-[9px] text-cyan-100/70 transition-colors hover:border-cyan-400/45 hover:text-cyan-50"
-            >
-              {openClawConsoleCollapsed ? "Expand" : "Minimize"}
-            </button>
+      {showOpenClawConsole ? (
+        <section className="pointer-events-auto fixed bottom-3 left-3 z-30 flex w-[520px] max-w-[calc(100vw-1.5rem)] flex-col overflow-hidden rounded border border-cyan-500/25 bg-black/78 shadow-2xl backdrop-blur">
+          <div className="flex items-center justify-between border-b border-cyan-500/15 px-3 py-2 font-mono text-[11px] uppercase tracking-[0.18em] text-cyan-200/80">
+            <span>OpenClaw Event Console</span>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-cyan-100/45">
+                agents {state.agents.length} | events{" "}
+                {filteredOpenClawLogEntries.length}/{openClawLogEntries.length}
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  void handleCopyOpenClawConsoleJson();
+                }}
+                className="rounded border border-cyan-500/20 px-2 py-0.5 text-[9px] text-cyan-100/70 transition-colors hover:border-cyan-400/45 hover:text-cyan-50"
+              >
+                {openClawConsoleCopyStatus === "copied"
+                  ? "Copied"
+                  : openClawConsoleCopyStatus === "error"
+                    ? "Copy Failed"
+                    : "Copy JSON"}
+              </button>
+              <button
+                type="button"
+                onClick={handleDownloadOpenClawConsoleJson}
+                className="rounded border border-cyan-500/20 px-2 py-0.5 text-[9px] text-cyan-100/70 transition-colors hover:border-cyan-400/45 hover:text-cyan-50"
+              >
+                Download JSON
+              </button>
+              <button
+                type="button"
+                onClick={handleClearOpenClawConsole}
+                className="rounded border border-cyan-500/20 px-2 py-0.5 text-[9px] text-cyan-100/70 transition-colors hover:border-cyan-400/45 hover:text-cyan-50"
+              >
+                Clear
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  setOpenClawConsoleCollapsed((previous) => !previous)
+                }
+                className="rounded border border-cyan-500/20 px-2 py-0.5 text-[9px] text-cyan-100/70 transition-colors hover:border-cyan-400/45 hover:text-cyan-50"
+              >
+                {openClawConsoleCollapsed ? "Expand" : "Minimize"}
+              </button>
+            </div>
           </div>
-        </div>
-        {!openClawConsoleCollapsed ? (
-          <div className="flex h-[320px] flex-col gap-3 overflow-y-auto bg-[#02090b]/96 px-3 py-2 font-mono text-[10px] leading-4">
+          {!openClawConsoleCollapsed ? (
+            <div className="flex h-[320px] flex-col gap-3 overflow-y-auto bg-[#02090b]/96 px-3 py-2 font-mono text-[10px] leading-4">
             <div className="rounded border border-cyan-500/10 bg-cyan-950/10 p-2">
               <div className="flex items-center gap-2">
                 <input
@@ -3070,9 +3117,10 @@ export function OfficeScreen() {
                 );
               })
             )}
-          </div>
-        ) : null}
-      </section>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
 
       <div
         className={`fixed bottom-3 z-30 flex flex-col items-end gap-2 ${sidebarOpen ? "right-84" : "right-3"} ${
@@ -3183,7 +3231,7 @@ export function OfficeScreen() {
                     );
                   }}
                   onAvatarShuffle={() =>
-                    handleAvatarShuffle(focusedChatAgent.agentId)
+                    openAgentEditor(focusedChatAgent.agentId, "avatar")
                   }
                   onVoiceSend={handleVoiceSend}
                 />
@@ -3306,6 +3354,29 @@ export function OfficeScreen() {
             </div>
           )}
         </section>
+      ) : null}
+      {agentEditorAgent ? (
+        <AgentEditorModal
+          open
+          client={client}
+          agents={state.agents}
+          agent={agentEditorAgent}
+          initialSection={agentEditorInitialSection}
+          onClose={() => {
+            setAgentEditorAgentId(null);
+          }}
+          onAvatarSave={handleAvatarProfileSave}
+          onRename={async (agentId, name) => {
+            if (!client) return false;
+            try {
+              await renameGatewayAgent({ client, agentId, name });
+              dispatch({ type: "updateAgent", agentId, patch: { name } });
+              return true;
+            } catch {
+              return false;
+            }
+          }}
+        />
       ) : null}
     </main>
   );

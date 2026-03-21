@@ -157,6 +157,7 @@ describe("studioBootstrapWorkflow", () => {
       deskAssignments: {},
       analytics: {},
       voiceReplies: {},
+      office: {},
     };
 
     expect(
@@ -197,6 +198,7 @@ describe("studioBootstrapWorkflow", () => {
       deskAssignments: {},
       analytics: {},
       voiceReplies: {},
+      office: {},
     };
 
     expect(

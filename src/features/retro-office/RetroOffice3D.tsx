@@ -9,6 +9,7 @@ import {
   Armchair,
   Settings2,
   Camera,
+  Users,
   X,
 } from "lucide-react";
 import {
@@ -1842,12 +1843,22 @@ function useAgentTick(
 // ============================================================
 
 const AWAY_THRESHOLD_MS = 15 * 60 * 1000;
+const COMPACT_AGENT_BADGE_LIMIT = 6;
 
 const estimatePhoneSpeechDurationMs = (text: string | null | undefined): number => {
   const normalized = text?.trim() ?? "";
   if (!normalized) return 5_000;
   const wordCount = normalized.split(/\s+/).filter(Boolean).length;
   return Math.max(5_000, Math.min(12_000, 1_800 + wordCount * 380));
+};
+
+const getAgentInitials = (name: string | null | undefined): string => {
+  const parts = (name ?? "").trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  return parts
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? "")
+    .join("");
 };
 
 export function RetroOffice3D({
@@ -1869,10 +1880,13 @@ export function RetroOffice3D({
   monitorAgentId = null,
   monitorByAgentId = {},
   githubSkill = null,
+  officeTitle = "Luke Headquarters",
+  officeTitleLoaded = false,
   voiceRepliesEnabled = false,
   voiceRepliesVoiceId = null,
   voiceRepliesSpeed = 1,
   voiceRepliesLoaded = false,
+  onOfficeTitleChange,
   onVoiceRepliesToggle,
   onVoiceRepliesVoiceChange,
   onVoiceRepliesSpeedChange,
@@ -1886,6 +1900,7 @@ export function RetroOffice3D({
   onStandupArrivalsChange,
   onStandupStartRequested,
   onMonitorSelect,
+  onAgentEdit,
   onDeskAssignmentChange,
   onDeskAssignmentsReset,
   onGithubReviewDismiss,
@@ -1922,10 +1937,13 @@ export function RetroOffice3D({
   monitorAgentId?: string | null;
   monitorByAgentId?: OfficeDeskMonitorMap;
   githubSkill?: SkillStatusEntry | null;
+  officeTitle?: string;
+  officeTitleLoaded?: boolean;
   voiceRepliesEnabled?: boolean;
   voiceRepliesVoiceId?: string | null;
   voiceRepliesSpeed?: number;
   voiceRepliesLoaded?: boolean;
+  onOfficeTitleChange?: (title: string) => void;
   onVoiceRepliesToggle?: (enabled: boolean) => void;
   onVoiceRepliesVoiceChange?: (voiceId: string | null) => void;
   onVoiceRepliesSpeedChange?: (speed: number) => void;
@@ -1945,6 +1963,7 @@ export function RetroOffice3D({
   onStandupArrivalsChange?: (arrivedAgentIds: string[]) => void;
   onStandupStartRequested?: () => void;
   onMonitorSelect?: (agentId: string | null) => void;
+  onAgentEdit?: (agentId: string) => void;
   onDeskAssignmentChange?: (deskUid: string, agentId: string | null) => void;
   onDeskAssignmentsReset?: (deskUids: string[]) => void;
   onGithubReviewDismiss?: () => void;
@@ -2006,6 +2025,7 @@ export function RetroOffice3D({
   const [spaceDown, setSpaceDown] = useState(false);
   const [spaceDragging, setSpaceDragging] = useState(false);
   const [standupBoardOpen, setStandupBoardOpen] = useState(false);
+  const [agentRosterOpen, setAgentRosterOpen] = useState(false);
   const autoOpenedStandupIdRef = useRef<string | null>(null);
   // Idea 1 (original): hovered agent for tooltip overlay.
   const [hoveredAgentId, setHoveredAgentId] = useState<string | null>(null);
@@ -2447,6 +2467,11 @@ export function RetroOffice3D({
     githubImmersive ||
     qaImmersive ||
     standupImmersive;
+  const compactRosterAgents = useMemo(
+    () => agents.slice(0, COMPACT_AGENT_BADGE_LIMIT),
+    [agents],
+  );
+  const hiddenAgentCount = Math.max(0, agents.length - compactRosterAgents.length);
   const standupActive =
     standupMeeting?.phase === "gathering" ||
     standupMeeting?.phase === "in_progress";
@@ -2465,6 +2490,10 @@ export function RetroOffice3D({
       ) ?? null
     );
   }, [assignedDeskIndexByAgentId, deskLocations, furniture, monitorAgentId]);
+  useEffect(() => {
+    if (!immersiveOverlayActive) return;
+    setAgentRosterOpen(false);
+  }, [immersiveOverlayActive]);
   const selectedItem = useMemo(
     () => furniture.find((item) => item._uid === selectedUid) ?? null,
     [furniture, selectedUid],
@@ -4824,6 +4853,7 @@ export function RetroOffice3D({
                 name={agent.name}
                 status={agent.status}
                 color={agentColorMap.get(agent.id) ?? "#888"}
+                appearance={"avatarProfile" in agent ? agent.avatarProfile ?? null : null}
                 agentsRef={renderAgentsRef}
                 agentLookupRef={renderAgentLookupRef}
                 onHover={isJanitor ? undefined : handleAgentHover}
@@ -4943,33 +4973,57 @@ export function RetroOffice3D({
 
       {/* New Idea 2: Camera preset buttons — top left. */}
       {!immersiveOverlayActive ? (
-        <div className="absolute top-3 left-3 flex items-center gap-1 z-10">
-          {(
-            [
-              {
-                key: "overview",
-                icon: <Maximize size={12} />,
-                title: "Overview",
-              },
-              {
-                key: "frontDesk",
-                icon: <Monitor size={12} />,
-                title: "Front desk",
-              },
-              { key: "lounge", icon: <Armchair size={12} />, title: "Lounge" },
-            ] as const
-          ).map(({ key, icon, title }) => (
+        <div className="absolute top-3 left-3 z-20 flex flex-col items-start gap-2">
+          <div className="flex items-center gap-1">
+            {(
+              [
+                {
+                  key: "overview",
+                  icon: <Maximize size={12} />,
+                  title: "Overview",
+                },
+                {
+                  key: "frontDesk",
+                  icon: <Monitor size={12} />,
+                  title: "Front desk",
+                },
+                { key: "lounge", icon: <Armchair size={12} />, title: "Lounge" },
+              ] as const
+            ).map(({ key, icon, title }) => (
+              <button
+                key={key}
+                title={title}
+                onClick={() => {
+                  cameraPresetRef.current = CAMERA_PRESET_MAP[key];
+                }}
+                className="w-7 h-7 flex items-center justify-center rounded-md bg-[#1c1610]/80 text-amber-500/60 border border-amber-900/20 hover:bg-[#2a1e14] hover:text-amber-400 backdrop-blur-sm transition-colors"
+              >
+                {icon}
+              </button>
+            ))}
+          </div>
+          {standupMeeting ? (
             <button
-              key={key}
-              title={title}
-              onClick={() => {
-                cameraPresetRef.current = CAMERA_PRESET_MAP[key];
-              }}
-              className="w-7 h-7 flex items-center justify-center rounded-md bg-[#1c1610]/80 text-amber-500/60 border border-amber-900/20 hover:bg-[#2a1e14] hover:text-amber-400 backdrop-blur-sm transition-colors"
+              type="button"
+              onClick={() => setStandupBoardOpen(true)}
+              className="rounded-xl border border-emerald-500/20 bg-[#0b1410]/90 px-3 py-2 text-left shadow-lg backdrop-blur-sm transition-colors hover:border-emerald-400/35 hover:bg-[#102017]/95"
             >
-              {icon}
+              <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-emerald-200/80">
+                Standup
+              </div>
+              <div className="mt-1 text-[11px] font-semibold text-white/90">
+                {standupMeeting.phase === "gathering"
+                  ? "Gathering in meeting room."
+                  : standupMeeting.phase === "in_progress"
+                    ? `Speaking: ${standupSpeakerCard?.agentName ?? "Team"}`
+                    : "Standup complete."}
+              </div>
+              <div className="mt-1 font-mono text-[10px] text-white/50">
+                {standupMeeting.arrivedAgentIds.length}/
+                {standupMeeting.participantOrder.length} arrived
+              </div>
             </button>
-          ))}
+          ) : null}
         </div>
       ) : null}
 
@@ -4978,135 +5032,189 @@ export function RetroOffice3D({
         <div className="absolute top-3 left-1/2 -translate-x-1/2 flex items-center gap-3 pointer-events-none select-none z-10">
           <div className="h-px w-12 bg-gradient-to-r from-transparent to-amber-500/40" />
           <span className="text-sm tracking-[0.3em] text-amber-300/80 font-bold uppercase">
-            Luke Headquarters
+            {officeTitle}
           </span>
           <div className="h-px w-12 bg-gradient-to-l from-transparent to-amber-500/40" />
         </div>
       ) : null}
 
-      {!immersiveOverlayActive && standupMeeting ? (
-        <div className="absolute top-3 right-3 z-20 flex items-center gap-2">
-          <div className="rounded-xl border border-emerald-500/20 bg-[#0b1410]/90 px-3 py-2 text-right shadow-lg backdrop-blur-sm">
-            <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-emerald-200/80">
-              Standup
-            </div>
-            <div className="mt-1 text-[11px] font-semibold text-white/90">
-              {standupMeeting.phase === "gathering"
-                ? "Gathering in meeting room."
-                : standupMeeting.phase === "in_progress"
-                  ? `Speaking: ${standupSpeakerCard?.agentName ?? "Team"}`
-                  : "Standup complete."}
-            </div>
-            <div className="mt-1 font-mono text-[10px] text-white/50">
-              {standupMeeting.arrivedAgentIds.length}/
-              {standupMeeting.participantOrder.length} arrived
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => setStandupBoardOpen(true)}
-            className="rounded-lg border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 font-mono text-[10px] uppercase tracking-[0.16em] text-emerald-100 transition-colors hover:border-emerald-400/50 hover:text-white"
-          >
-            Standup board
-          </button>
-        </div>
-      ) : null}
-
-      {/* Agent cards — compact single row pinned to top. */}
+      {/* Agent roster — compact top summary with overflow panel. */}
       {!immersiveOverlayActive ? (
-        <div className="absolute top-10 left-1/2 -translate-x-1/2 flex items-center gap-1.5 z-10">
-          {agents.map((agent) => {
-            const status = agentStatusLookup[agent.id];
-            const isError = status?.isError ?? agent.status === "error";
-            const working = status?.working ?? agent.status === "working";
-            const mood = moodByAgentId[agent.id];
-            const dotClass = isError
-              ? "bg-red-400"
-              : working
-                ? "bg-green-400"
-                : "bg-yellow-400";
-            return (
-              <div
-                key={agent.id}
-                className="relative flex items-center gap-2 bg-[#1c1610]/90 backdrop-blur-sm px-2.5 py-1.5 rounded-lg border border-amber-900/20 shadow cursor-pointer select-none"
-                onClick={() =>
-                  setSpotlightAgentId((prev) =>
-                    prev === agent.id ? null : agent.id,
-                  )
-                }
-              >
-                {/* E3 Idea 1: Mood emoji float. */}
-                {mood && (
-                  <span
-                    key={mood.ts}
-                    className="absolute -top-6 left-1/2 -translate-x-1/2 text-sm pointer-events-none"
-                    style={{ animation: "mood-float 2.5s ease-out forwards" }}
-                  >
-                    {mood.emoji}
-                  </span>
-                )}
-                <div className="relative shrink-0">
-                  <div
-                    className="w-4 h-4 rounded-sm"
+        <div className="absolute top-10 left-1/2 z-20 -translate-x-1/2">
+          <div className="flex items-center gap-2 rounded-full border border-amber-900/25 bg-[#1c1610]/92 px-2 py-2 shadow-lg backdrop-blur-sm">
+            <div className="flex items-center -space-x-1.5">
+              {compactRosterAgents.map((agent) => {
+                const status = agentStatusLookup[agent.id];
+                const isError = status?.isError ?? agent.status === "error";
+                const working = status?.working ?? agent.status === "working";
+                const mood = moodByAgentId[agent.id];
+                const dotClass = isError
+                  ? "bg-red-400"
+                  : working
+                    ? "bg-green-400"
+                    : "bg-yellow-400";
+                return (
+                  <button
+                    key={agent.id}
+                    type="button"
+                    title={agent.name}
+                    onMouseEnter={() => handleAgentHover(agent.id)}
+                    onMouseLeave={handleAgentUnhover}
+                    onClick={() => {
+                      setSpotlightAgentId(agent.id);
+                      onAgentEdit?.(agent.id);
+                    }}
+                    className={`relative flex h-8 w-8 items-center justify-center rounded-full border text-[9px] font-bold text-[#120e08] shadow transition-transform hover:-translate-y-0.5 ${
+                      spotlightAgentId === agent.id
+                        ? "border-amber-200/80 ring-2 ring-amber-200/20"
+                        : "border-[#120e08] hover:border-amber-200/50"
+                    }`}
                     style={{ backgroundColor: agent.color }}
-                  />
-                  <div
-                    className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full border border-[#1c1610] ${dotClass}`}
-                  />
+                  >
+                    {/* E3 Idea 1: Mood emoji float. */}
+                    {mood ? (
+                      <span
+                        key={mood.ts}
+                        className="absolute -top-6 left-1/2 -translate-x-1/2 text-sm pointer-events-none"
+                        style={{ animation: "mood-float 2.5s ease-out forwards" }}
+                      >
+                        {mood.emoji}
+                      </span>
+                    ) : null}
+                    <span>{getAgentInitials(agent.name)}</span>
+                    <span
+                      className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border border-[#1c1610] ${dotClass}`}
+                    />
+                  </button>
+                );
+              })}
+              {hiddenAgentCount > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => setAgentRosterOpen(true)}
+                  className="flex h-8 min-w-8 items-center justify-center rounded-full border border-amber-900/30 bg-[#120e08] px-2 text-[10px] font-semibold text-amber-200 transition-colors hover:border-amber-500/40 hover:text-white"
+                >
+                  +{hiddenAgentCount}
+                </button>
+              ) : null}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setAgentRosterOpen((prev) => !prev)}
+              className="inline-flex items-center gap-2 rounded-full border border-amber-900/25 bg-black/20 px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.16em] text-amber-100 transition-colors hover:border-amber-500/35 hover:text-white"
+            >
+              <Users className="h-3.5 w-3.5" />
+              <span>{agents.length}</span>
+              <span className="hidden sm:inline">agents</span>
+            </button>
+          </div>
+
+          {agentRosterOpen ? (
+            <div className="absolute left-1/2 top-full mt-2 w-[min(92vw,560px)] -translate-x-1/2 rounded-2xl border border-amber-900/25 bg-[#120e08]/96 p-3 shadow-2xl backdrop-blur-sm">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div>
+                  <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-amber-500/70">
+                    Team roster
+                  </div>
+                  <div className="mt-1 text-sm font-semibold text-amber-100">
+                    Compact view for larger fleets.
+                  </div>
                 </div>
-                <span className="text-[10px] font-semibold text-amber-100 whitespace-nowrap">
-                  {agent.name}
-                </span>
-                {/* Follow cam toggle button. */}
                 <button
-                  title={
-                    followAgentId === agent.id
-                      ? "Exit follow cam"
-                      : "Follow cam"
-                  }
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setFollowAgentId((prev) =>
-                      prev === agent.id ? null : agent.id,
-                    );
-                  }}
-                  className={`w-4 h-4 flex items-center justify-center rounded transition-colors ${
-                    followAgentId === agent.id
-                      ? "text-white opacity-100"
-                      : "text-white/50 hover:text-white opacity-70 hover:opacity-100"
-                  }`}
+                  type="button"
+                  onClick={() => setAgentRosterOpen(false)}
+                  className="rounded-full border border-amber-900/25 p-2 text-amber-200 transition-colors hover:border-amber-500/35 hover:text-white"
+                  aria-label="Close roster"
                 >
-                  <Camera size={9} />
+                  <X className="h-4 w-4" />
                 </button>
-                <button
-                  title={
-                    monitorAgentId === agent.id
-                      ? "Close desk monitor"
-                      : "Open desk monitor"
-                  }
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onMonitorSelect?.(
-                      monitorAgentId === agent.id ? null : agent.id,
-                    );
-                  }}
-                  className={`w-4 h-4 flex items-center justify-center rounded transition-colors ${
-                    monitorAgentId === agent.id
-                      ? "text-emerald-300 opacity-100"
-                      : "text-white/50 hover:text-emerald-200 opacity-70 hover:opacity-100"
-                  }`}
-                >
-                  <Monitor size={9} />
-                </button>
-                {/* Idea 9 (original): Run counter badge. */}
-                {(runCountByAgentId[agent.id] ?? 0) > 0 && (
-                  <span className="text-[8px] font-bold bg-amber-600/30 text-amber-400 border border-amber-700/30 rounded-full px-1.5 py-0.5 leading-none">
-                    {runCountByAgentId[agent.id]}
-                  </span>
-                )}
               </div>
-            );
-          })}
+
+              <div className="grid max-h-[min(60vh,420px)] gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
+                {agents.map((agent) => {
+                  const status = agentStatusLookup[agent.id];
+                  const isError = status?.isError ?? agent.status === "error";
+                  const working = status?.working ?? agent.status === "working";
+                  const dotClass = isError
+                    ? "bg-red-400"
+                    : working
+                      ? "bg-green-400"
+                      : "bg-yellow-400";
+                  const runCount = runCountByAgentId[agent.id] ?? 0;
+                  return (
+                    <div
+                      key={agent.id}
+                      className="flex items-center gap-2 rounded-xl border border-amber-900/20 bg-black/20 px-3 py-2"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSpotlightAgentId(agent.id);
+                          onAgentEdit?.(agent.id);
+                          setAgentRosterOpen(false);
+                        }}
+                        className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                      >
+                        <div
+                          className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-[#120e08]"
+                          style={{ backgroundColor: agent.color }}
+                        >
+                          {getAgentInitials(agent.name)}
+                          <span
+                            className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border border-[#120e08] ${dotClass}`}
+                          />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-semibold text-amber-100">
+                            {agent.name}
+                          </div>
+                          <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-amber-500/70">
+                            {isError ? "error" : working ? "working" : "idle"}
+                            {runCount > 0 ? ` · ${runCount} runs` : ""}
+                          </div>
+                        </div>
+                      </button>
+                      <button
+                        type="button"
+                        title={
+                          followAgentId === agent.id ? "Exit follow cam" : "Follow cam"
+                        }
+                        onClick={() =>
+                          setFollowAgentId((prev) => (prev === agent.id ? null : agent.id))
+                        }
+                        className={`flex h-8 w-8 items-center justify-center rounded-lg border transition-colors ${
+                          followAgentId === agent.id
+                            ? "border-amber-200/30 bg-amber-100/10 text-white"
+                            : "border-amber-900/20 text-white/60 hover:border-amber-500/35 hover:text-white"
+                        }`}
+                      >
+                        <Camera size={12} />
+                      </button>
+                      <button
+                        type="button"
+                        title={
+                          monitorAgentId === agent.id
+                            ? "Close desk monitor"
+                            : "Open desk monitor"
+                        }
+                        onClick={() =>
+                          onMonitorSelect?.(monitorAgentId === agent.id ? null : agent.id)
+                        }
+                        className={`flex h-8 w-8 items-center justify-center rounded-lg border transition-colors ${
+                          monitorAgentId === agent.id
+                            ? "border-emerald-300/30 bg-emerald-300/10 text-emerald-200"
+                            : "border-amber-900/20 text-white/60 hover:border-emerald-400/30 hover:text-emerald-200"
+                        }`}
+                      >
+                        <Monitor size={12} />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
 
@@ -5901,51 +6009,55 @@ export function RetroOffice3D({
         </div>
       ) : null}
       {settingsModalOpen ? (
-        <div className="absolute inset-0 z-30 flex items-start justify-end bg-black/35 p-4 backdrop-blur-[1px]">
-          <div className="w-full max-w-sm overflow-hidden rounded-xl border border-cyan-500/20 bg-[#05090d]/95 shadow-2xl">
+        <div className="absolute inset-0 z-30 flex items-start justify-end overflow-y-auto bg-black/35 p-4 backdrop-blur-[1px]">
+          <div className="flex max-h-[calc(100vh-2rem)] w-full max-w-sm flex-col overflow-hidden rounded-xl border border-cyan-500/20 bg-[#05090d]/95 shadow-2xl">
             <div className="flex items-start justify-between border-b border-cyan-500/10 px-4 py-3">
               <div>
                 <div className="font-mono text-[10px] font-semibold tracking-[0.28em] text-cyan-300/75">
-                  VOICE SETTINGS
+                  STUDIO SETTINGS
                 </div>
                 <div className="mt-1 text-[11px] text-white/45">
-                  Control natural-sounding spoken replies for agents across the
-                  app.
+                  Customize the office banner and spoken replies across the app.
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => setSettingsModalOpen(false)}
                 className="flex h-7 w-7 items-center justify-center rounded-md border border-cyan-500/10 bg-black/20 text-cyan-100/70 transition-colors hover:border-cyan-400/30 hover:text-cyan-100"
-                aria-label="Close voice settings"
+                aria-label="Close studio settings"
               >
                 <X size={12} />
               </button>
             </div>
-            <SettingsPanel
-              gatewayStatus={gatewayStatus}
-              gatewayUrl={atmAnalytics?.gatewayUrl}
-              onGatewayDisconnect={() => {
-                onGatewayDisconnect?.();
-                setSettingsModalOpen(false);
-              }}
-              voiceRepliesEnabled={voiceRepliesEnabled}
-              voiceRepliesVoiceId={voiceRepliesVoiceId}
-              voiceRepliesSpeed={voiceRepliesSpeed}
-              voiceRepliesLoaded={voiceRepliesLoaded}
-              onVoiceRepliesToggle={(enabled) =>
-                onVoiceRepliesToggle?.(enabled)
-              }
-              onVoiceRepliesVoiceChange={(voiceId) =>
-                onVoiceRepliesVoiceChange?.(voiceId)
-              }
-              onVoiceRepliesSpeedChange={(speed) =>
-                onVoiceRepliesSpeedChange?.(speed)
-              }
-              onVoiceRepliesPreview={(voiceId, voiceName) =>
-                onVoiceRepliesPreview?.(voiceId, voiceName)
-              }
-            />
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              <SettingsPanel
+                gatewayStatus={gatewayStatus}
+                gatewayUrl={atmAnalytics?.gatewayUrl}
+                onGatewayDisconnect={() => {
+                  onGatewayDisconnect?.();
+                  setSettingsModalOpen(false);
+                }}
+                officeTitle={officeTitle}
+                officeTitleLoaded={officeTitleLoaded}
+                onOfficeTitleChange={(title) => onOfficeTitleChange?.(title)}
+                voiceRepliesEnabled={voiceRepliesEnabled}
+                voiceRepliesVoiceId={voiceRepliesVoiceId}
+                voiceRepliesSpeed={voiceRepliesSpeed}
+                voiceRepliesLoaded={voiceRepliesLoaded}
+                onVoiceRepliesToggle={(enabled) =>
+                  onVoiceRepliesToggle?.(enabled)
+                }
+                onVoiceRepliesVoiceChange={(voiceId) =>
+                  onVoiceRepliesVoiceChange?.(voiceId)
+                }
+                onVoiceRepliesSpeedChange={(speed) =>
+                  onVoiceRepliesSpeedChange?.(speed)
+                }
+                onVoiceRepliesPreview={(voiceId, voiceName) =>
+                  onVoiceRepliesPreview?.(voiceId, voiceName)
+                }
+              />
+            </div>
           </div>
         </div>
       ) : null}

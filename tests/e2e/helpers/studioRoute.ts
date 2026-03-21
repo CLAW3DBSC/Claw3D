@@ -1,10 +1,11 @@
 import type { Page, Route, Request } from "@playwright/test";
+import type { AgentAvatarProfile } from "@/lib/avatars/profile";
 
 export type StudioSettingsFixture = {
   version: 1;
   gateway: { url: string; token: string } | null;
   focused: Record<string, { mode: "focused"; filter: string; selectedAgentId: string | null }>;
-  avatars: Record<string, Record<string, string>>;
+  avatars: Record<string, Record<string, AgentAvatarProfile>>;
 };
 
 const DEFAULT_SETTINGS: StudioSettingsFixture = {
@@ -65,25 +66,31 @@ const createStudioRoute = (initial: StudioSettingsFixture = DEFAULT_SETTINGS) =>
     }
 
     if (patch.avatars && typeof patch.avatars === "object") {
-      const avatarsPatch = patch.avatars as Record<string, Record<string, string | null> | null>;
+      const avatarsPatch = patch.avatars as
+        | Record<string, Record<string, AgentAvatarProfile | null> | null>
+        | null;
       const avatarsNext: StudioSettingsFixture["avatars"] = { ...next.avatars };
-      for (const [gatewayKey, gatewayPatch] of Object.entries(avatarsPatch)) {
+      for (const [gatewayKey, gatewayPatch] of Object.entries(avatarsPatch ?? {})) {
         if (gatewayPatch === null) {
           delete avatarsNext[gatewayKey];
           continue;
         }
         const existing = avatarsNext[gatewayKey] ? { ...avatarsNext[gatewayKey] } : {};
-        for (const [agentId, seedPatch] of Object.entries(gatewayPatch)) {
-          if (seedPatch === null) {
+        for (const [agentId, avatarPatch] of Object.entries(gatewayPatch)) {
+          if (avatarPatch === null) {
             delete existing[agentId];
             continue;
           }
-          const seed = typeof seedPatch === "string" ? seedPatch.trim() : "";
-          if (!seed) {
+          if (
+            typeof avatarPatch !== "object" ||
+            avatarPatch === null ||
+            typeof avatarPatch.seed !== "string" ||
+            avatarPatch.seed.trim().length === 0
+          ) {
             delete existing[agentId];
             continue;
           }
-          existing[agentId] = seed;
+          existing[agentId] = avatarPatch;
         }
         avatarsNext[gatewayKey] = existing;
       }

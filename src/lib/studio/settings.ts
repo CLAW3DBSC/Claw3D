@@ -4,6 +4,8 @@ import type {
   StandupManualEntry,
   StandupScheduleConfig,
 } from "@/lib/office/standup/types";
+import type { AgentAvatarProfile } from "@/lib/avatars/profile";
+import { normalizeAgentAvatarProfile } from "@/lib/avatars/profile";
 
 export type StudioGatewaySettings = {
   url: string;
@@ -60,7 +62,16 @@ export type StudioVoiceRepliesPreferencePatch = {
   speed?: number;
 };
 
+export type StudioOfficePreference = {
+  title: string;
+};
+
+export type StudioOfficePreferencePatch = {
+  title?: string | null;
+};
+
 export type StudioDeskAssignments = Record<string, string>;
+export type StudioAgentAvatars = Record<string, AgentAvatarProfile>;
 
 export type StudioStandupPreference = StandupConfig;
 
@@ -83,10 +94,11 @@ export type StudioSettings = {
   version: 1;
   gateway: StudioGatewaySettings | null;
   focused: Record<string, StudioFocusedPreference>;
-  avatars: Record<string, Record<string, string>>;
+  avatars: Record<string, StudioAgentAvatars>;
   deskAssignments: Record<string, StudioDeskAssignments>;
   analytics: Record<string, StudioAnalyticsPreference>;
   voiceReplies: Record<string, StudioVoiceRepliesPreference>;
+  office: Record<string, StudioOfficePreference>;
   standup?: Record<string, StudioStandupPreference>;
 };
 
@@ -98,10 +110,11 @@ export type StudioSettingsPublic = Omit<StudioSettings, "gateway" | "standup"> &
 export type StudioSettingsPatch = {
   gateway?: StudioGatewaySettingsPatch | null;
   focused?: Record<string, Partial<StudioFocusedPreference> | null>;
-  avatars?: Record<string, Record<string, string | null> | null>;
+  avatars?: Record<string, Record<string, AgentAvatarProfile | null> | null>;
   deskAssignments?: Record<string, Record<string, string | null> | null>;
   analytics?: Record<string, StudioAnalyticsPreferencePatch | null>;
   voiceReplies?: Record<string, StudioVoiceRepliesPreferencePatch | null>;
+  office?: Record<string, StudioOfficePreferencePatch | null>;
   standup?: Record<string, StudioStandupPreferencePatch | null>;
 };
 
@@ -257,6 +270,20 @@ const normalizeOptionalIsoString = (
   return trimmed ? trimmed : null;
 };
 
+const DEFAULT_OFFICE_TITLE = "Luke Headquarters";
+
+const normalizeOfficeTitle = (
+  value: unknown,
+  fallback: string = DEFAULT_OFFICE_TITLE
+) => {
+  const title = coerceString(value);
+  return (title || fallback).slice(0, 48);
+};
+
+export const defaultStudioOfficePreference = (): StudioOfficePreference => ({
+  title: DEFAULT_OFFICE_TITLE,
+});
+
 const normalizeStandupScheduleConfig = (
   value: unknown,
   fallback: StandupScheduleConfig = defaultStudioStandupScheduleConfig()
@@ -400,20 +427,18 @@ const normalizeFocused = (value: unknown): Record<string, StudioFocusedPreferenc
   return focused;
 };
 
-const normalizeAvatars = (value: unknown): Record<string, Record<string, string>> => {
+const normalizeAvatars = (value: unknown): Record<string, StudioAgentAvatars> => {
   if (!isRecord(value)) return {};
-  const avatars: Record<string, Record<string, string>> = {};
+  const avatars: Record<string, StudioAgentAvatars> = {};
   for (const [gatewayKeyRaw, gatewayRaw] of Object.entries(value)) {
     const gatewayKey = normalizeGatewayKey(gatewayKeyRaw);
     if (!gatewayKey) continue;
     if (!isRecord(gatewayRaw)) continue;
-    const entries: Record<string, string> = {};
-    for (const [agentIdRaw, seedRaw] of Object.entries(gatewayRaw)) {
+    const entries: StudioAgentAvatars = {};
+    for (const [agentIdRaw, avatarRaw] of Object.entries(gatewayRaw)) {
       const agentId = coerceString(agentIdRaw);
       if (!agentId) continue;
-      const seed = coerceString(seedRaw);
-      if (!seed) continue;
-      entries[agentId] = seed;
+      entries[agentId] = normalizeAgentAvatarProfile(avatarRaw, agentId);
     }
     avatars[gatewayKey] = entries;
   }
@@ -522,6 +547,27 @@ const normalizeVoiceReplies = (
   return voiceReplies;
 };
 
+const normalizeOfficePreference = (
+  value: unknown,
+  fallback: StudioOfficePreference = defaultStudioOfficePreference()
+): StudioOfficePreference => {
+  if (!isRecord(value)) return fallback;
+  return {
+    title: normalizeOfficeTitle(value.title, fallback.title),
+  };
+};
+
+const normalizeOffice = (value: unknown): Record<string, StudioOfficePreference> => {
+  if (!isRecord(value)) return {};
+  const office: Record<string, StudioOfficePreference> = {};
+  for (const [gatewayKeyRaw, officeRaw] of Object.entries(value)) {
+    const gatewayKey = normalizeGatewayKey(gatewayKeyRaw);
+    if (!gatewayKey) continue;
+    office[gatewayKey] = normalizeOfficePreference(officeRaw);
+  }
+  return office;
+};
+
 export const defaultStudioSettings = (): StudioSettings => ({
   version: SETTINGS_VERSION,
   gateway: null,
@@ -530,6 +576,7 @@ export const defaultStudioSettings = (): StudioSettings => ({
   deskAssignments: {},
   analytics: {},
   voiceReplies: {},
+  office: {},
   standup: {},
 });
 
@@ -579,6 +626,7 @@ export const normalizeStudioSettings = (raw: unknown): StudioSettings => {
   const deskAssignments = normalizeDeskAssignments(raw.deskAssignments);
   const analytics = normalizeAnalytics(raw.analytics);
   const voiceReplies = normalizeVoiceReplies(raw.voiceReplies);
+  const office = normalizeOffice(raw.office);
   const standup = normalizeStandup(raw.standup);
   return {
     version: SETTINGS_VERSION,
@@ -588,6 +636,7 @@ export const normalizeStudioSettings = (raw: unknown): StudioSettings => {
     deskAssignments,
     analytics,
     voiceReplies,
+    office,
     standup,
   };
 };
@@ -603,6 +652,7 @@ export const mergeStudioSettings = (
   const nextDeskAssignments = { ...current.deskAssignments };
   const nextAnalytics = { ...current.analytics };
   const nextVoiceReplies = { ...current.voiceReplies };
+  const nextOffice = { ...current.office };
   const nextStandup = { ...(current.standup ?? {}) };
   if (patch.focused) {
     for (const [keyRaw, value] of Object.entries(patch.focused)) {
@@ -626,19 +676,14 @@ export const mergeStudioSettings = (
       }
       if (!isRecord(gatewayPatch)) continue;
       const existing = nextAvatars[gatewayKey] ? { ...nextAvatars[gatewayKey] } : {};
-      for (const [agentIdRaw, seedPatchRaw] of Object.entries(gatewayPatch)) {
+      for (const [agentIdRaw, avatarPatchRaw] of Object.entries(gatewayPatch)) {
         const agentId = coerceString(agentIdRaw);
         if (!agentId) continue;
-        if (seedPatchRaw === null) {
+        if (avatarPatchRaw === null) {
           delete existing[agentId];
           continue;
         }
-        const seed = coerceString(seedPatchRaw);
-        if (!seed) {
-          delete existing[agentId];
-          continue;
-        }
-        existing[agentId] = seed;
+        existing[agentId] = normalizeAgentAvatarProfile(avatarPatchRaw, agentId);
       }
       nextAvatars[gatewayKey] = existing;
     }
@@ -713,6 +758,24 @@ export const mergeStudioSettings = (
       );
     }
   }
+  if (patch.office) {
+    for (const [gatewayKeyRaw, officePatch] of Object.entries(patch.office)) {
+      const gatewayKey = normalizeGatewayKey(gatewayKeyRaw);
+      if (!gatewayKey) continue;
+      if (officePatch === null) {
+        delete nextOffice[gatewayKey];
+        continue;
+      }
+      const fallback = nextOffice[gatewayKey] ?? defaultStudioOfficePreference();
+      nextOffice[gatewayKey] = normalizeOfficePreference(
+        {
+          ...fallback,
+          ...officePatch,
+        },
+        fallback
+      );
+    }
+  }
   if (patch.standup) {
     for (const [gatewayKeyRaw, standupPatch] of Object.entries(patch.standup)) {
       const gatewayKey = normalizeGatewayKey(gatewayKeyRaw);
@@ -769,6 +832,7 @@ export const mergeStudioSettings = (
     deskAssignments: nextDeskAssignments,
     analytics: nextAnalytics,
     voiceReplies: nextVoiceReplies,
+    office: nextOffice,
     standup: nextStandup,
   };
 };
@@ -787,6 +851,15 @@ export const resolveAgentAvatarSeed = (
   gatewayUrl: string,
   agentId: string
 ): string | null => {
+  const profile = resolveAgentAvatarProfile(settings, gatewayUrl, agentId);
+  return profile?.seed ?? null;
+};
+
+export const resolveAgentAvatarProfile = (
+  settings: StudioSettings | StudioSettingsPublic,
+  gatewayUrl: string,
+  agentId: string
+): AgentAvatarProfile | null => {
   const gatewayKey = normalizeGatewayKey(gatewayUrl);
   if (!gatewayKey) return null;
   const agentKey = coerceString(agentId);
@@ -819,6 +892,15 @@ export const resolveVoiceRepliesPreference = (
   const gatewayKey = normalizeGatewayKey(gatewayUrl);
   if (!gatewayKey) return defaultStudioVoiceRepliesPreference();
   return settings.voiceReplies[gatewayKey] ?? defaultStudioVoiceRepliesPreference();
+};
+
+export const resolveOfficePreference = (
+  settings: StudioSettings | StudioSettingsPublic,
+  gatewayUrl: string
+): StudioOfficePreference => {
+  const gatewayKey = normalizeGatewayKey(gatewayUrl);
+  if (!gatewayKey) return defaultStudioOfficePreference();
+  return settings.office[gatewayKey] ?? defaultStudioOfficePreference();
 };
 
 export const resolveStandupPreference = (
