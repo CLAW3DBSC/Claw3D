@@ -479,6 +479,7 @@ const NON_RETRYABLE_CONNECT_ERROR_CODES = new Set([
   "studio.gateway_token_missing",
   "studio.gateway_url_invalid",
   "studio.settings_load_failed",
+  "studio.upstream_error",
 ]);
 
 const isNonRetryableConnectErrorCode = (code: string | null): boolean => {

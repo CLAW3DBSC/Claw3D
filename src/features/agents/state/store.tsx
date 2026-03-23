@@ -122,6 +122,7 @@ type Action =
   | { type: "setError"; error: string | null }
   | { type: "setLoading"; loading: boolean }
   | { type: "updateAgent"; agentId: string; patch: Partial<AgentState> }
+  | { type: "removeAgent"; agentId: string }
   | { type: "appendOutput"; agentId: string; line: string; transcript?: TranscriptAppendMeta }
   | { type: "enqueueQueuedMessage"; agentId: string; message: string }
   | { type: "removeQueuedMessage"; agentId: string; index: number }
@@ -338,6 +339,18 @@ const reducer = (state: AgentStoreState, action: Action): AgentStoreState => {
           };
         }),
       };
+    case "removeAgent": {
+      const nextAgents = state.agents.filter((agent) => agent.agentId !== action.agentId);
+      const selectedAgentId =
+        state.selectedAgentId === action.agentId
+          ? nextAgents[0]?.agentId ?? null
+          : state.selectedAgentId;
+      return {
+        ...state,
+        agents: nextAgents,
+        selectedAgentId,
+      };
+    }
     case "appendOutput":
       return {
         ...state,

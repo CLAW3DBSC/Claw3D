@@ -1,5 +1,14 @@
-import { buildAgentMainSessionKey, isSameSessionKey } from "@/lib/gateway/GatewayClient";
+import {
+  buildAgentMainSessionKey,
+  isSameSessionKey,
+  type GatewayClient,
+} from "@/lib/gateway/GatewayClient";
 import { type GatewayModelPolicySnapshot } from "@/lib/gateway/models";
+import { removeGatewayAgentFromConfigOnly } from "@/lib/gateway/agentConfig";
+import {
+  isStaleTemporarySkillAgentName,
+  isTemporarySkillAgentName,
+} from "@/lib/skills/tempAgents";
 import { type StudioSettings, type StudioSettingsPublic } from "@/lib/studio/settings";
 import {
   type SummaryPreviewSnapshot,
@@ -156,6 +165,29 @@ export async function hydrateAgentFleetFromGateway(params: {
       agentsResult = fallback;
     }
   }
+  const staleTemporaryAgents = agentsResult.agents.filter((agent) =>
+    isStaleTemporarySkillAgentName(agent.name ?? agent.identity?.name)
+  );
+  if (staleTemporaryAgents.length > 0) {
+    await Promise.all(
+      staleTemporaryAgents.map(async (agent) => {
+        try {
+          await removeGatewayAgentFromConfigOnly({
+            client: params.client as unknown as GatewayClient,
+            agentId: agent.id,
+          });
+        } catch (err) {
+          logError("Failed to remove stale temporary skill agent from config.", err);
+        }
+      })
+    );
+  }
+  agentsResult = {
+    ...agentsResult,
+    agents: agentsResult.agents.filter(
+      (agent) => !isTemporarySkillAgentName(agent.name ?? agent.identity?.name)
+    ),
+  };
   const mainKey = agentsResult.mainKey?.trim() || "main";
 
   const mainSessionKeyByAgent = new Map<string, SessionsListEntry | null>();

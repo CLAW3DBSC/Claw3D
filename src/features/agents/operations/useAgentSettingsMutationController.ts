@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AgentPermissionsDraft } from "@/features/agents/operations/agentPermissionsOperation";
 import { updateAgentPermissionsViaStudio } from "@/features/agents/operations/agentPermissionsOperation";
 import { performCronCreateFlow } from "@/features/agents/operations/cronCreateOperation";
-import { deleteAgentViaStudio } from "@/features/agents/operations/deleteAgentOperation";
+import { deleteAgentRecordViaStudio } from "@/features/agents/operations/deleteAgentOperation";
 import {
   planAgentSettingsMutation,
   type AgentSettingsMutationContext,
@@ -34,7 +34,6 @@ import {
   renameGatewayAgent,
   updateGatewayAgentSkillsAllowlist,
 } from "@/lib/gateway/agentConfig";
-import { fetchJson } from "@/lib/http";
 import { canRemoveSkillSource } from "@/lib/skills/presentation";
 import { setAgentSkillEnabled } from "@/lib/skills/agentAccess";
 import { removeSkillFromGateway } from "@/lib/skills/remove";
@@ -73,6 +72,7 @@ export type UseAgentSettingsMutationControllerParams = {
   clearInspectSidebar: () => void;
   setInspectSidebarCapabilities: (agentId: string) => void;
   dispatchUpdateAgent: (agentId: string, patch: Partial<AgentState>) => void;
+  removeAgent?: (agentId: string) => void;
   setMobilePaneChat: () => void;
   setError: (message: string) => void;
 };
@@ -441,7 +441,7 @@ export function useAgentSettingsMutationController(params: UseAgentSettingsMutat
       const agent = params.agents.find((entry) => entry.agentId === decision.normalizedAgentId);
       if (!agent) return;
       const confirmed = window.confirm(
-        `Delete ${agent.name}? This removes the agent from gateway config + scheduled automations and moves its workspace/state into ~/.openclaw/trash on the gateway host.`
+        `Delete ${agent.name}? This removes the agent record from OpenClaw and clears its scheduled automations. Claw3D will not touch workspace files.`
       );
       if (!confirmed) return;
 
@@ -451,12 +451,12 @@ export function useAgentSettingsMutationController(params: UseAgentSettingsMutat
         agentName: agent.name,
         label: `Delete ${agent.name}`,
         executeMutation: async () => {
-          await deleteAgentViaStudio({
+          await deleteAgentRecordViaStudio({
             client: params.client,
             agentId: decision.normalizedAgentId,
-            fetchJson,
             logError: (message, error) => console.error(message, error),
           });
+          params.removeAgent?.(decision.normalizedAgentId);
           params.clearInspectSidebar();
         },
       });
@@ -947,7 +947,7 @@ export function useAgentSettingsMutationController(params: UseAgentSettingsMutat
         },
       });
     },
-    [runSkillSetupMutation, setSkillMessage, settingsSkillsReport]
+    [params.client, runSkillSetupMutation, setSkillMessage, settingsSkillsReport]
   );
 
   const handleSaveSkillApiKey = useCallback(

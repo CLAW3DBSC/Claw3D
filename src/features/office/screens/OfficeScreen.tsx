@@ -63,7 +63,7 @@ import {
   applyCreateAgentBootstrapPermissions,
   CREATE_AGENT_DEFAULT_PERMISSIONS,
 } from "@/features/agents/operations/createAgentBootstrapOperation";
-import { deleteAgentViaStudio } from "@/features/agents/operations/deleteAgentOperation";
+import { deleteAgentRecordViaStudio } from "@/features/agents/operations/deleteAgentOperation";
 import { planAgentSettingsMutation } from "@/features/agents/operations/agentSettingsMutationWorkflow";
 import {
   executeHistorySyncCommands,
@@ -1383,7 +1383,7 @@ export function OfficeScreen({
       );
       if (!agent) return;
       const confirmed = window.confirm(
-        `Delete ${agent.name}? This removes the agent from gateway config, scheduled automations, and moves its state into ~/.openclaw/trash on the gateway host.`,
+        `Delete ${agent.name}? This removes the agent record from OpenClaw and clears its scheduled automations. Claw3D will not touch workspace files.`,
       );
       if (!confirmed) return;
 
@@ -1440,12 +1440,16 @@ export function OfficeScreen({
             });
           },
           executeMutation: async () => {
-            await deleteAgentViaStudio({
+            await deleteAgentRecordViaStudio({
               client,
               agentId: decision.normalizedAgentId,
               logError: (message, error) => console.error(message, error),
             });
             clearDeletedAgentUiState(decision.normalizedAgentId);
+            dispatch({
+              type: "removeAgent",
+              agentId: decision.normalizedAgentId,
+            });
           },
           shouldAwaitRemoteRestart: async () => false,
           reloadAgents: () => loadAgents({ forceSettings: true }),
@@ -1458,6 +1462,7 @@ export function OfficeScreen({
       clearDeletedAgentUiState,
       client,
       createAgentBlock,
+      dispatch,
       enqueueConfigMutation,
       hasDeleteMutationBlock,
       loadAgents,
