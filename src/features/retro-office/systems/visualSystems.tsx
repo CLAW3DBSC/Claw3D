@@ -349,23 +349,25 @@ export function DeskNameplates({
         return (
           <Billboard key={`nameplate-${index}`} position={[wx, 0.55, wz]}>
             <mesh position={[0, 0, -0.001]}>
-              <planeGeometry args={[0.68, 0.18]} />
+              <planeGeometry args={[1.1, 0.18]} />
               <meshBasicMaterial color="#0a0804" transparent opacity={0.75} />
             </mesh>
-            <mesh position={[-0.32, 0, 0]}>
+            <mesh position={[-0.52, 0, 0]}>
               <planeGeometry args={[0.04, 0.18]} />
               <meshBasicMaterial color={agent.color} />
             </mesh>
             <Text
               position={[0.02, 0, 0.001]}
-              fontSize={0.1}
+              fontSize={0.09}
               color="#c8a860"
               anchorX="center"
               anchorY="middle"
-              maxWidth={0.56}
+              maxWidth={1.0}
               font={undefined}
+              overflowWrap="break-word"
+              whiteSpace="nowrap"
             >
-              {agent.name}
+              {agent.name.length > 14 ? agent.name.slice(0, 13) + "…" : agent.name}
             </Text>
           </Billboard>
         );
