@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { resolveUserPath } from "@/lib/clawdbot/paths";
+import { resolveStateDir, resolveUserPath } from "@/lib/clawdbot/paths";
 import type { RemovableSkillSource, SkillRemoveRequest, SkillRemoveResult } from "@/lib/skills/types";
 
 const resolveComparablePath = (input: string): string => {
@@ -56,6 +56,18 @@ export const removeSkillLocally = (params: SkillRemoveRequest): SkillRemoveResul
   const baseDir = normalizeRequiredPath(params.baseDir, "baseDir");
   const workspaceDir = normalizeRequiredPath(params.workspaceDir, "workspaceDir");
   const managedSkillsDir = normalizeRequiredPath(params.managedSkillsDir, "managedSkillsDir");
+
+  // Security: validate that workspaceDir and managedSkillsDir are under the
+  // server-side state directory. Without this check, an attacker can supply
+  // arbitrary values for these fields, effectively controlling the "allowed root"
+  // and bypassing the isPathInside containment check below.
+  const stateDir = resolveStateDir();
+  if (!isPathInside(stateDir, workspaceDir)) {
+    throw new Error(`workspaceDir is not under the state directory: ${workspaceDir}`);
+  }
+  if (!isPathInside(stateDir, managedSkillsDir)) {
+    throw new Error(`managedSkillsDir is not under the state directory: ${managedSkillsDir}`);
+  }
 
   const allowedRoot = resolveAllowedRoot({
     source,
