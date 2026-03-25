@@ -65,7 +65,6 @@ import { useFinalizedAssistantReplyListener } from "@/hooks/useFinalizedAssistan
 import { useStudioVoiceRepliesPreference } from "@/hooks/useStudioVoiceRepliesPreference";
 import { useVoiceReplyPlayback } from "@/hooks/useVoiceReplyPlayback";
 import { isLocalGatewayUrl } from "@/lib/gateway/local-gateway";
-import { randomUUID } from "@/lib/uuid";
 import type { ExecApprovalDecision, PendingExecApproval } from "@/features/agents/approvals/types";
 import {
   planAwaitingUserInputPatches,
@@ -586,6 +585,12 @@ const AgentsPageScreen = () => {
         type: "updateAgent",
         agentId,
         patch,
+      });
+    },
+    removeAgent: (agentId) => {
+      dispatch({
+        type: "removeAgent",
+        agentId,
       });
     },
     setMobilePaneChat: () => {

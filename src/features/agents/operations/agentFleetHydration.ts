@@ -1,5 +1,11 @@
-import { buildAgentMainSessionKey, isSameSessionKey } from "@/lib/gateway/GatewayClient";
+import {
+  buildAgentMainSessionKey,
+  isSameSessionKey,
+} from "@/lib/gateway/GatewayClient";
 import { type GatewayModelPolicySnapshot } from "@/lib/gateway/models";
+import {
+  isTemporarySkillAgentName,
+} from "@/lib/skills/tempAgents";
 import { type StudioSettings, type StudioSettingsPublic } from "@/lib/studio/settings";
 import {
   type SummaryPreviewSnapshot,
@@ -156,6 +162,12 @@ export async function hydrateAgentFleetFromGateway(params: {
       agentsResult = fallback;
     }
   }
+  agentsResult = {
+    ...agentsResult,
+    agents: agentsResult.agents.filter(
+      (agent) => !isTemporarySkillAgentName(agent.name ?? agent.identity?.name)
+    ),
+  };
   const mainKey = agentsResult.mainKey?.trim() || "main";
 
   const mainSessionKeyByAgent = new Map<string, SessionsListEntry | null>();
