@@ -3,6 +3,7 @@ import path from "node:path";
 
 import { resolveStateDir } from "@/lib/clawdbot/paths";
 import {
+  DEFAULT_OFFICE_TITLE,
   defaultStudioSettings,
   mergeStudioSettings,
   normalizeStudioSettings,
@@ -44,8 +45,22 @@ const readOpenclawGatewayDefaults = (): { url: string; token: string } | null =>
   }
 };
 
-export const loadLocalGatewayDefaults = () => {
-  return readOpenclawGatewayDefaults();
+export const loadLocalGatewayDefaults = (): { url: string; token: string } | null => {
+  const envUrl = process.env.CLAW3D_GATEWAY_URL?.trim();
+  const envToken = process.env.CLAW3D_GATEWAY_TOKEN?.trim();
+  const fromFile = readOpenclawGatewayDefaults();
+  if (fromFile) return fromFile;
+  if (envUrl) return { url: envUrl, token: envToken ?? "" };
+  return null;
+};
+
+/**
+ * Read the office title from `CLAW3D_OFFICE_TITLE` env var at runtime.
+ * Falls back to the hardcoded default when the var is unset or empty.
+ */
+export const resolveDefaultOfficeTitle = (): string => {
+  const envTitle = process.env.CLAW3D_OFFICE_TITLE?.trim();
+  return envTitle || DEFAULT_OFFICE_TITLE;
 };
 
 export const loadStudioSettings = (): StudioSettings => {

@@ -9,6 +9,7 @@ import {
   applyStudioSettingsPatch,
   loadLocalGatewayDefaults,
   loadStudioSettings,
+  resolveDefaultOfficeTitle,
 } from "@/lib/studio/settings-store";
 
 export const runtime = "nodejs";
@@ -20,10 +21,12 @@ export async function GET() {
   try {
     const settings = loadStudioSettings();
     const localGatewayDefaults = loadLocalGatewayDefaults();
+    const defaultOfficeTitle = resolveDefaultOfficeTitle();
     return NextResponse.json(
       {
         settings: sanitizeStudioSettings(settings),
         localGatewayDefaults: sanitizeStudioGatewaySettings(localGatewayDefaults),
+        defaultOfficeTitle,
       },
       { headers: { "Cache-Control": "no-store" } }
     );

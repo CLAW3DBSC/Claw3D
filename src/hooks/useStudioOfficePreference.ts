@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { StudioSettingsCoordinator } from "@/lib/studio/coordinator";
 import {
+  DEFAULT_OFFICE_TITLE,
   defaultStudioOfficePreferencePublic,
   resolveOfficePreferencePublic,
   type StudioOfficePreferencePublic,
@@ -33,13 +34,28 @@ export const useStudioOfficePreference = ({
     setLoaded(false);
     const loadPreference = async () => {
       try {
-        const settings = await settingsCoordinator.loadSettings({ maxAgeMs: 30_000 });
+        const envelope = typeof settingsCoordinator.loadSettingsEnvelope === "function"
+          ? await settingsCoordinator.loadSettingsEnvelope({ maxAgeMs: 30_000 })
+          : { settings: await settingsCoordinator.loadSettings({ maxAgeMs: 30_000 }) };
+        const settings = envelope.settings ?? null;
         if (cancelled) return;
-        setPreference(
-          settings
-            ? resolveOfficePreferencePublic(settings, gatewayKey)
-            : defaultStudioOfficePreferencePublic()
-        );
+        const resolved = settings
+          ? resolveOfficePreferencePublic(settings, gatewayKey)
+          : defaultStudioOfficePreferencePublic();
+        // When the resolved title is still the hardcoded default and the server
+        // provided a runtime-configured default (CLAW3D_OFFICE_TITLE env var),
+        // prefer the server value so .env changes take effect without a rebuild.
+        const serverDefault = "defaultOfficeTitle" in envelope
+          ? (envelope.defaultOfficeTitle ?? "")
+          : "";
+        if (
+          serverDefault &&
+          serverDefault !== DEFAULT_OFFICE_TITLE &&
+          resolved.title === DEFAULT_OFFICE_TITLE
+        ) {
+          resolved.title = serverDefault;
+        }
+        setPreference(resolved);
       } catch (error) {
         if (!cancelled) {
           console.error("Failed to load office preference.", error);

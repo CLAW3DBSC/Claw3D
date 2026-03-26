@@ -14,6 +14,7 @@ import type {
 export type StudioSettingsResponse = {
   settings: StudioSettingsPublic;
   localGatewayDefaults?: StudioGatewaySettingsPublic | null;
+  defaultOfficeTitle?: string;
 };
 
 export type StudioSettingsLoadOptions = {
