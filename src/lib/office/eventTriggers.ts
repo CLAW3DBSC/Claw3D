@@ -40,10 +40,7 @@ import {
   resolveOfficeStandupDirective,
   resolveOfficeTextDirective,
 } from "@/lib/office/deskDirectives";
-import {
-  extractText,
-  extractThinking,
-} from "@/lib/text/message-extract";
+import { extractText, extractThinking } from "@/lib/text/message-extract";
 import { randomUUID } from "@/lib/uuid";
 
 // Office animation is derived in two passes:
@@ -120,9 +117,11 @@ export type OfficeAnimationTriggerState = {
 export type OfficeAnimationState = {
   awaitingApprovalByAgentId: BooleanByAgentId;
   cleaningCues: OfficeCleaningCue[];
+  danceUntilByAgentId: NumberByAgentId;
   deskHoldByAgentId: BooleanByAgentId;
   githubHoldByAgentId: BooleanByAgentId;
   gymHoldByAgentId: BooleanByAgentId;
+  jukeboxHoldByAgentId: BooleanByAgentId;
   manualGymUntilByAgentId: NumberByAgentId;
   pendingStandupRequest: OfficeStandupTriggerRequest | null;
   phoneBoothHoldByAgentId: BooleanByAgentId;
@@ -136,14 +135,11 @@ export type OfficeAnimationState = {
   workingUntilByAgentId: NumberByAgentId;
 };
 
-const emptyObject = <T extends Record<string, unknown>>(): T => ({} as T);
+const emptyObject = <T extends Record<string, unknown>>(): T => ({}) as T;
 
 const normalizeCommandText = (value: string | null | undefined): string => {
   if (!value) return "";
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, " ");
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
 };
 
 const buildStableLatestRequestSeed = (value: string): string => {
@@ -167,7 +163,8 @@ const pruneStringMap = (
 ): StringByAgentId =>
   Object.fromEntries(
     Object.entries(source).filter(
-      ([agentId, value]) => activeAgentIds.has(agentId) && value.trim().length > 0,
+      ([agentId, value]) =>
+        activeAgentIds.has(agentId) && value.trim().length > 0,
     ),
   );
 
@@ -181,7 +178,8 @@ const prunePhoneCallMap = (
         activeAgentIds.has(agentId) &&
         Boolean(request?.callee?.trim()) &&
         (request.phase === "needs_message" ||
-          (request.phase === "ready_to_call" && Boolean(request.message?.trim()))),
+          (request.phase === "ready_to_call" &&
+            Boolean(request.message?.trim()))),
     ),
   );
 
@@ -195,7 +193,8 @@ const pruneTextMessageMap = (
         activeAgentIds.has(agentId) &&
         Boolean(request?.recipient?.trim()) &&
         (request.phase === "needs_message" ||
-          (request.phase === "ready_to_send" && Boolean(request.message?.trim()))),
+          (request.phase === "ready_to_send" &&
+            Boolean(request.message?.trim()))),
     ),
   );
 
@@ -220,7 +219,9 @@ const resolveMessageRole = (message: unknown): string | null => {
   return typeof role === "string" ? role : null;
 };
 
-const resolveChatPayloadRole = (payload: ChatEventPayload | undefined): string | null => {
+const resolveChatPayloadRole = (
+  payload: ChatEventPayload | undefined,
+): string | null => {
   if (!payload) return null;
   const messageRole = resolveMessageRole(payload.message);
   if (messageRole) return messageRole;
@@ -231,19 +232,20 @@ const resolveChatPayloadRole = (payload: ChatEventPayload | undefined): string |
   return typeof payloadRole === "string" ? payloadRole : null;
 };
 
-const isUserLikeChatRole = (role: string | null, state: ChatEventPayload["state"]): boolean => {
+const isUserLikeChatRole = (
+  role: string | null,
+  state: ChatEventPayload["state"],
+): boolean => {
   if (role === "user" || role === "human" || role === "input") return true;
   if (role === "system") return state === "final";
   return role === null && state === "final";
 };
 
-const resolveLatestDirective = <TDirective>(
-  params: {
-    lastUserMessage: string | null | undefined;
-    transcriptEntries: TranscriptEntry[] | undefined;
-    resolver: (value: string | null | undefined) => TDirective | null;
-  },
-): LatestDirective<TDirective> | null => {
+const resolveLatestDirective = <TDirective>(params: {
+  lastUserMessage: string | null | undefined;
+  transcriptEntries: TranscriptEntry[] | undefined;
+  resolver: (value: string | null | undefined) => TDirective | null;
+}): LatestDirective<TDirective> | null => {
   const latestMessageDirective = params.resolver(params.lastUserMessage);
   if (latestMessageDirective) {
     const text = params.lastUserMessage?.trim() ?? "";
@@ -253,10 +255,17 @@ const resolveLatestDirective = <TDirective>(
       text,
     };
   }
-  if (!Array.isArray(params.transcriptEntries) || params.transcriptEntries.length === 0) {
+  if (
+    !Array.isArray(params.transcriptEntries) ||
+    params.transcriptEntries.length === 0
+  ) {
     return null;
   }
-  for (let index = params.transcriptEntries.length - 1; index >= 0; index -= 1) {
+  for (
+    let index = params.transcriptEntries.length - 1;
+    index >= 0;
+    index -= 1
+  ) {
     const entry = params.transcriptEntries[index];
     if (!entry || entry.role !== "user") continue;
     const directive = params.resolver(entry.text);
@@ -270,17 +279,23 @@ const resolveLatestDirective = <TDirective>(
   return null;
 };
 
-const isTransientBoothRequestFresh = (requestedAt: number, nowMs: number): boolean =>
-  nowMs - requestedAt <= TRANSIENT_BOOTH_RESTORE_MAX_AGE_MS;
+const isTransientBoothRequestFresh = (
+  requestedAt: number,
+  nowMs: number,
+): boolean => nowMs - requestedAt <= TRANSIENT_BOOTH_RESTORE_MAX_AGE_MS;
 
 const maybeResolveCompletedPhoneCallRequest = (
   current: OfficePhoneCallRequest | null,
   line: string,
 ): OfficePhoneCallRequest | null => {
   if (!current) return null;
-  const match = line.match(/^\[phone booth\]\s*Call with\s+(.+)\s+finished\.$/i);
+  const match = line.match(
+    /^\[phone booth\]\s*Call with\s+(.+)\s+finished\.$/i,
+  );
   if (!match) return current;
-  return normalizeCommandText(match[1]) === normalizeCommandText(current.callee) ? null : current;
+  return normalizeCommandText(match[1]) === normalizeCommandText(current.callee)
+    ? null
+    : current;
 };
 
 const maybeResolveCompletedTextMessageRequest = (
@@ -288,9 +303,12 @@ const maybeResolveCompletedTextMessageRequest = (
   line: string,
 ): OfficeTextMessageRequest | null => {
   if (!current) return null;
-  const match = line.match(/^\[messaging booth\]\s*Message to\s+(.+)\s+sent\.$/i);
+  const match = line.match(
+    /^\[messaging booth\]\s*Message to\s+(.+)\s+sent\.$/i,
+  );
   if (!match) return current;
-  return normalizeCommandText(match[1]) === normalizeCommandText(current.recipient)
+  return normalizeCommandText(match[1]) ===
+    normalizeCommandText(current.recipient)
     ? null
     : current;
 };
@@ -361,7 +379,9 @@ const resolveLatestPhoneCallRequest = (params: {
     }
   }
   if (!current) return null;
-  return isTransientBoothRequestFresh(current.requestedAt, params.nowMs) ? current : null;
+  return isTransientBoothRequestFresh(current.requestedAt, params.nowMs)
+    ? current
+    : null;
 };
 
 const resolveLatestTextMessageRequest = (params: {
@@ -430,7 +450,9 @@ const resolveLatestTextMessageRequest = (params: {
     }
   }
   if (!current) return null;
-  return isTransientBoothRequestFresh(current.requestedAt, params.nowMs) ? current : null;
+  return isTransientBoothRequestFresh(current.requestedAt, params.nowMs)
+    ? current
+    : null;
 };
 
 const resolveAgentIdForSessionKey = (
@@ -439,7 +461,9 @@ const resolveAgentIdForSessionKey = (
 ): string | null => {
   const trimmed = sessionKey?.trim() ?? "";
   if (!trimmed) return null;
-  const matched = agents.find((agent) => isSameSessionKey(agent.sessionKey, trimmed));
+  const matched = agents.find((agent) =>
+    isSameSessionKey(agent.sessionKey, trimmed),
+  );
   if (matched) return matched.agentId;
   return parseAgentIdFromSessionKey(trimmed);
 };
@@ -501,13 +525,13 @@ const hasOtherOfficeDirective = (
 ): boolean =>
   Boolean(
     snapshot.desk ||
-      snapshot.github ||
-      snapshot.gym ||
-      snapshot.qa ||
-      snapshot.art ||
-      snapshot.standup ||
-      snapshot.call ||
-      snapshot.text,
+    snapshot.github ||
+    snapshot.gym ||
+    snapshot.qa ||
+    snapshot.art ||
+    snapshot.standup ||
+    snapshot.call ||
+    snapshot.text,
   );
 
 const resolvePhoneCallFollowUpRequest = (params: {
@@ -522,11 +546,14 @@ const resolvePhoneCallFollowUpRequest = (params: {
   const message = params.message.trim();
   if (!message) return null;
   return {
-    key: buildPhoneCallDirectiveKey({
-      callee: params.current.callee,
-      phase: "ready_to_call",
-      message,
-    }, params.requestSeed ?? String(params.requestedAt)),
+    key: buildPhoneCallDirectiveKey(
+      {
+        callee: params.current.callee,
+        phase: "ready_to_call",
+        message,
+      },
+      params.requestSeed ?? String(params.requestedAt),
+    ),
     callee: params.current.callee,
     message,
     phase: "ready_to_call",
@@ -587,7 +614,10 @@ const pruneOfficeAnimationTriggerState = (
       state.githubDirectiveKeyByAgentId,
       activeAgentIds,
     ),
-    githubHoldByAgentId: pruneBooleanMap(state.githubHoldByAgentId, activeAgentIds),
+    githubHoldByAgentId: pruneBooleanMap(
+      state.githubHoldByAgentId,
+      activeAgentIds,
+    ),
     gymCooldownUntilByAgentId: pruneFutureMap(
       state.gymCooldownUntilByAgentId,
       activeAgentIds,
@@ -606,7 +636,10 @@ const pruneOfficeAnimationTriggerState = (
       state.qaDirectiveKeyByAgentId,
       activeAgentIds,
     ),
-    phoneCallByAgentId: prunePhoneCallMap(state.phoneCallByAgentId, activeAgentIds),
+    phoneCallByAgentId: prunePhoneCallMap(
+      state.phoneCallByAgentId,
+      activeAgentIds,
+    ),
     phoneCallDirectiveKeyByAgentId: pruneStringMap(
       state.phoneCallDirectiveKeyByAgentId,
       activeAgentIds,
@@ -686,7 +719,10 @@ const recordThinkingActivity = (
   nowMs: number,
 ): NumberByAgentId => ({
   ...current,
-  [agentId]: Math.max(current[agentId] ?? 0, nowMs + THINKING_ACTIVITY_LATCH_MS),
+  [agentId]: Math.max(
+    current[agentId] ?? 0,
+    nowMs + THINKING_ACTIVITY_LATCH_MS,
+  ),
 });
 
 const applyUserMessageTriggers = (params: {
@@ -717,7 +753,8 @@ const applyUserMessageTriggers = (params: {
   if (githubDirective) {
     const directiveKey = normalizeCommandText(params.message);
     const isSuppressed =
-      next.suppressedGithubDirectiveKeyByAgentId[params.agentId] === directiveKey;
+      next.suppressedGithubDirectiveKeyByAgentId[params.agentId] ===
+      directiveKey;
     next = {
       ...next,
       githubDirectiveKeyByAgentId: {
@@ -769,10 +806,7 @@ const applyUserMessageTriggers = (params: {
       },
     };
   }
-  if (
-    params.agentId === "main" &&
-    intentSnapshot.standup === "standup"
-  ) {
+  if (params.agentId === "main" && intentSnapshot.standup === "standup") {
     const requestKey = normalizeCommandText(params.message);
     if (next.pendingStandupRequest?.key !== requestKey) {
       next = {
@@ -862,33 +896,34 @@ const applyUserMessageTriggers = (params: {
   return next;
 };
 
-export const createOfficeAnimationTriggerState = (): OfficeAnimationTriggerState => ({
-  cleaningCues: [],
-  deskDirectiveKeyByAgentId: emptyObject(),
-  deskHoldByAgentId: emptyObject(),
-  githubDirectiveKeyByAgentId: emptyObject(),
-  githubHoldByAgentId: emptyObject(),
-  gymCooldownUntilByAgentId: emptyObject(),
-  lastManualGymCommandKeyByAgentId: emptyObject(),
-  manualGymUntilByAgentId: emptyObject(),
-  pendingStandupRequest: null,
-  phoneCallByAgentId: emptyObject(),
-  phoneCallDirectiveKeyByAgentId: emptyObject(),
-  qaDirectiveKeyByAgentId: emptyObject(),
-  qaHoldByAgentId: emptyObject(),
-  sessionEpochSnapshot: {},
-  skillGymDirectiveKeyByAgentId: emptyObject(),
-  skillGymHoldByAgentId: emptyObject(),
-  streamingUntilByAgentId: emptyObject(),
-  suppressedPhoneCallDirectiveKeyByAgentId: emptyObject(),
-  suppressedGithubDirectiveKeyByAgentId: emptyObject(),
-  suppressedQaDirectiveKeyByAgentId: emptyObject(),
-  suppressedTextMessageDirectiveKeyByAgentId: emptyObject(),
-  textMessageByAgentId: emptyObject(),
-  textMessageDirectiveKeyByAgentId: emptyObject(),
-  thinkingUntilByAgentId: emptyObject(),
-  workingUntilByAgentId: emptyObject(),
-});
+export const createOfficeAnimationTriggerState =
+  (): OfficeAnimationTriggerState => ({
+    cleaningCues: [],
+    deskDirectiveKeyByAgentId: emptyObject(),
+    deskHoldByAgentId: emptyObject(),
+    githubDirectiveKeyByAgentId: emptyObject(),
+    githubHoldByAgentId: emptyObject(),
+    gymCooldownUntilByAgentId: emptyObject(),
+    lastManualGymCommandKeyByAgentId: emptyObject(),
+    manualGymUntilByAgentId: emptyObject(),
+    pendingStandupRequest: null,
+    phoneCallByAgentId: emptyObject(),
+    phoneCallDirectiveKeyByAgentId: emptyObject(),
+    qaDirectiveKeyByAgentId: emptyObject(),
+    qaHoldByAgentId: emptyObject(),
+    sessionEpochSnapshot: {},
+    skillGymDirectiveKeyByAgentId: emptyObject(),
+    skillGymHoldByAgentId: emptyObject(),
+    streamingUntilByAgentId: emptyObject(),
+    suppressedPhoneCallDirectiveKeyByAgentId: emptyObject(),
+    suppressedGithubDirectiveKeyByAgentId: emptyObject(),
+    suppressedQaDirectiveKeyByAgentId: emptyObject(),
+    suppressedTextMessageDirectiveKeyByAgentId: emptyObject(),
+    textMessageByAgentId: emptyObject(),
+    textMessageDirectiveKeyByAgentId: emptyObject(),
+    thinkingUntilByAgentId: emptyObject(),
+    workingUntilByAgentId: emptyObject(),
+  });
 
 export const reduceOfficeAnimationTriggerEvent = (params: {
   agents: AgentState[];
@@ -897,7 +932,11 @@ export const reduceOfficeAnimationTriggerEvent = (params: {
   state: OfficeAnimationTriggerState;
 }): OfficeAnimationTriggerState => {
   const nowMs = params.nowMs ?? Date.now();
-  let next = pruneOfficeAnimationTriggerState(params.state, params.agents, nowMs);
+  let next = pruneOfficeAnimationTriggerState(
+    params.state,
+    params.agents,
+    nowMs,
+  );
   const kind = classifyGatewayEventKind(params.event.event);
 
   if (kind === "runtime-chat") {
@@ -908,7 +947,8 @@ export const reduceOfficeAnimationTriggerEvent = (params: {
     );
     if (!payload || !agentId) return next;
     const messageText = extractText(payload.message)?.trim() ?? "";
-    const thinkingText = extractThinking(payload.message ?? payload)?.trim() ?? "";
+    const thinkingText =
+      extractThinking(payload.message ?? payload)?.trim() ?? "";
     const role = resolveChatPayloadRole(payload);
     if (payload.runId) {
       next = {
@@ -1015,7 +1055,9 @@ export const reduceOfficeAnimationTriggerEvent = (params: {
 
   const resolved = parseExecApprovalResolved(params.event);
   if (resolved) {
-    const approvalAgentId = params.agents.find((agent) => agent.awaitingUserInput)?.agentId;
+    const approvalAgentId = params.agents.find(
+      (agent) => agent.awaitingUserInput,
+    )?.agentId;
     if (approvalAgentId) {
       next = {
         ...next,
@@ -1039,7 +1081,11 @@ export const reconcileOfficeAnimationTriggerState = (params: {
   // Reconciliation is the durable source of truth. It replays the latest user-visible intent
   // from current agent state so recovered history can restore holds even when chat events were missed.
   const nowMs = params.nowMs ?? Date.now();
-  const next = pruneOfficeAnimationTriggerState(params.state, params.agents, nowMs);
+  const next = pruneOfficeAnimationTriggerState(
+    params.state,
+    params.agents,
+    nowMs,
+  );
 
   const activeAgentIds = new Set(params.agents.map((agent) => agent.agentId));
   const currentImmediateGymKeys = pruneStringMap(
@@ -1100,7 +1146,8 @@ export const reconcileOfficeAnimationTriggerState = (params: {
     });
     if (githubDirective) {
       githubDirectiveKeyByAgentId[agentId] = githubDirective.key;
-      const suppressedKey = next.suppressedGithubDirectiveKeyByAgentId[agentId] ?? "";
+      const suppressedKey =
+        next.suppressedGithubDirectiveKeyByAgentId[agentId] ?? "";
       if (
         githubDirective.directive !== "release" &&
         suppressedKey !== githubDirective.key
@@ -1118,8 +1165,12 @@ export const reconcileOfficeAnimationTriggerState = (params: {
     });
     if (qaDirective) {
       qaDirectiveKeyByAgentId[agentId] = qaDirective.key;
-      const suppressedKey = next.suppressedQaDirectiveKeyByAgentId[agentId] ?? "";
-      if (qaDirective.directive !== "release" && suppressedKey !== qaDirective.key) {
+      const suppressedKey =
+        next.suppressedQaDirectiveKeyByAgentId[agentId] ?? "";
+      if (
+        qaDirective.directive !== "release" &&
+        suppressedKey !== qaDirective.key
+      ) {
         qaHoldByAgentId[agentId] = true;
       }
     } else if (next.qaHoldByAgentId[agentId]) {
@@ -1190,7 +1241,9 @@ export const reconcileOfficeAnimationTriggerState = (params: {
     previous: next.sessionEpochSnapshot,
     agents: params.agents,
   });
-  const agentMap = new Map(params.agents.map((agent) => [agent.agentId, agent]));
+  const agentMap = new Map(
+    params.agents.map((agent) => [agent.agentId, agent]),
+  );
   const cleaningCues = [...next.cleaningCues];
   for (const agentId of triggeredAgentIds) {
     const agent = agentMap.get(agentId);
@@ -1248,7 +1301,8 @@ export const clearOfficeAnimationTriggerHold = (params: {
     };
   }
   if (params.hold === "call") {
-    const directiveKey = next.phoneCallDirectiveKeyByAgentId[params.agentId] ?? "";
+    const directiveKey =
+      next.phoneCallDirectiveKeyByAgentId[params.agentId] ?? "";
     const phoneCallByAgentId = { ...next.phoneCallByAgentId };
     delete phoneCallByAgentId[params.agentId];
     return {
@@ -1263,7 +1317,8 @@ export const clearOfficeAnimationTriggerHold = (params: {
     };
   }
   if (params.hold === "text") {
-    const directiveKey = next.textMessageDirectiveKeyByAgentId[params.agentId] ?? "";
+    const directiveKey =
+      next.textMessageDirectiveKeyByAgentId[params.agentId] ?? "";
     const textMessageByAgentId = { ...next.textMessageByAgentId };
     delete textMessageByAgentId[params.agentId];
     return {
@@ -1305,6 +1360,7 @@ export const buildOfficeAnimationState = (params: {
   const awaitingApprovalByAgentId: BooleanByAgentId = {};
   const deskHoldByAgentId: BooleanByAgentId = {};
   const gymHoldByAgentId: BooleanByAgentId = {};
+  const jukeboxHoldByAgentId: BooleanByAgentId = {};
   const phoneBoothHoldByAgentId: BooleanByAgentId = {};
   const phoneCallByAgentId: PhoneCallByAgentId = {};
   const smsBoothHoldByAgentId: BooleanByAgentId = {};
@@ -1353,9 +1409,11 @@ export const buildOfficeAnimationState = (params: {
   return {
     awaitingApprovalByAgentId,
     cleaningCues: params.state.cleaningCues,
+    danceUntilByAgentId: {},
     deskHoldByAgentId,
     githubHoldByAgentId: params.state.githubHoldByAgentId,
     gymHoldByAgentId,
+    jukeboxHoldByAgentId,
     manualGymUntilByAgentId: params.state.manualGymUntilByAgentId,
     pendingStandupRequest: params.state.pendingStandupRequest,
     phoneBoothHoldByAgentId,

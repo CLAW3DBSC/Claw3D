@@ -112,6 +112,13 @@ import { HistoryPanel } from "@/features/office/components/panels/HistoryPanel";
 import { InboxPanel } from "@/features/office/components/panels/InboxPanel";
 import { PlaybooksPanel } from "@/features/office/components/panels/PlaybooksPanel";
 import { SkillsMarketplaceModal } from "@/features/office/components/panels/SkillsMarketplaceModal";
+import { JukeboxPanel } from "@/features/spotify-jukebox/components/JukeboxPanel";
+import { JukeboxDisabledPanel } from "@/features/spotify-jukebox/components/JukeboxDisabledPanel";
+import { executeBrowserJukeboxCommand } from "@/features/spotify-jukebox/agentBridge";
+import {
+  SOUNDCLAW_PLAYBACK_STARTED_EVENT_NAME,
+  useJukeboxStore,
+} from "@/features/spotify-jukebox/store";
 import { useOfficeSkillTriggers } from "@/features/office/hooks/useOfficeSkillTriggers";
 import { useRemoteOfficePresence } from "@/features/office/hooks/useRemoteOfficePresence";
 import { useRemoteOfficeLayout } from "@/features/office/hooks/useRemoteOfficeLayout";
@@ -147,6 +154,7 @@ import {
   buildOfficeDeskMonitor,
   type OfficeDeskMonitor,
 } from "@/lib/office/deskMonitor";
+import { deriveSkillReadinessState } from "@/lib/skills/presentation";
 import type { StandupAgentSnapshot } from "@/lib/office/standup/types";
 import type { SkillStatusEntry } from "@/lib/skills/types";
 
@@ -175,6 +183,31 @@ const GYM_WORKOUT_LATCH_MS = 60_000;
 const MAIN_AGENT_ID = "main";
 const MAX_OPENCLAW_LOG_ENTRIES = 200;
 const MAX_OPENCLAW_AGENT_OUTPUT_LINES = 12;
+const OFFICE_DANCE_MS = 60_000;
+
+const getLatestUserRequestForAgent = (
+  agent: AgentState,
+): { text: string; requestKey: string } | null => {
+  const transcriptEntries = Array.isArray(agent.transcriptEntries)
+    ? agent.transcriptEntries
+    : [];
+  for (let index = transcriptEntries.length - 1; index >= 0; index -= 1) {
+    const entry = transcriptEntries[index];
+    if (!entry || entry.role !== "user") continue;
+    const text = entry.text.trim();
+    if (!text) continue;
+    return {
+      text,
+      requestKey: `${agent.sessionKey}:${entry.sequenceKey}:${text}`,
+    };
+  }
+  const fallback = agent.lastUserMessage?.trim() ?? "";
+  if (!fallback) return null;
+  return {
+    text: fallback,
+    requestKey: `${agent.sessionKey}:fallback:${fallback}`,
+  };
+};
 
 type OpenClawLogEntry = {
   id: string;
@@ -890,12 +923,67 @@ export function OfficeScreen({
   const [gatewayModels, setGatewayModels] = useState<GatewayModelChoice[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [marketplaceOpen, setMarketplaceOpen] = useState(false);
+  const [danceUntilByAgentId, setDanceUntilByAgentId] = useState<Record<string, number>>({});
+  const initJukeboxStore = useJukeboxStore((state) => state.init);
+  const jukeboxToken = useJukeboxStore((state) => state.token);
+  // Auto-open jukebox panel for legacy direct-auth callbacks.
+  const [jukeboxOpen, setJukeboxOpen] = useState(() => {
+    if (typeof window === "undefined") return false;
+    const searchParams = new URL(window.location.href).searchParams;
+    return searchParams.has("code");
+  });
   const [activeSidebarTab, setActiveSidebarTab] =
     useState<HQSidebarTab>("inbox");
+  const pendingJukeboxCommandTimeoutsRef = useRef<
+    Map<string, { requestKey: string; timeoutId: number }>
+  >(new Map());
+  const handledJukeboxRequestKeyByAgentIdRef = useRef<Record<string, string>>({});
   const router = useRouter();
   const { showOnboarding, completeOnboarding, resetOnboarding } =
     useOnboardingState();
   const [forceShowOnboarding, setForceShowOnboarding] = useState(false);
+  useEffect(() => {
+    initJukeboxStore();
+  }, [initJukeboxStore]);
+  useEffect(() => {
+    const handlePlaybackStarted = () => {
+      const now = Date.now();
+      const until = now + OFFICE_DANCE_MS;
+      setDanceUntilByAgentId((previous) => {
+        const next: Record<string, number> = {};
+        for (const agent of state.agents) {
+          next[agent.agentId] = until;
+        }
+        return { ...previous, ...next };
+      });
+    };
+    window.addEventListener(
+      SOUNDCLAW_PLAYBACK_STARTED_EVENT_NAME,
+      handlePlaybackStarted,
+    );
+    return () => {
+      window.removeEventListener(
+        SOUNDCLAW_PLAYBACK_STARTED_EVENT_NAME,
+        handlePlaybackStarted,
+      );
+    };
+  }, [state.agents]);
+  useEffect(() => {
+    const now = Date.now();
+    setDanceUntilByAgentId((previous) =>
+      Object.fromEntries(
+        Object.entries(previous).filter(([, until]) => until > now),
+      ),
+    );
+  }, [state.agents]);
+  useEffect(() => {
+    return () => {
+      for (const pendingEntry of pendingJukeboxCommandTimeoutsRef.current.values()) {
+        window.clearTimeout(pendingEntry.timeoutId);
+      }
+      pendingJukeboxCommandTimeoutsRef.current.clear();
+    };
+  }, []);
   const {
     loaded: officeTitleLoaded,
     title: officeTitle,
@@ -2245,6 +2333,7 @@ export function OfficeScreen({
 
     return {
       ...base,
+      danceUntilByAgentId: danceUntilByAgentId,
       deskHoldByAgentId: {
         ...base.deskHoldByAgentId,
         ...skillTriggerHoldMaps.deskHoldByAgentId,
@@ -2257,6 +2346,10 @@ export function OfficeScreen({
         ...base.gymHoldByAgentId,
         ...skillTriggerHoldMaps.gymHoldByAgentId,
       },
+      jukeboxHoldByAgentId: {
+        ...base.jukeboxHoldByAgentId,
+        ...skillTriggerHoldMaps.jukeboxHoldByAgentId,
+      },
       qaHoldByAgentId: {
         ...base.qaHoldByAgentId,
         ...skillTriggerHoldMaps.qaHoldByAgentId,
@@ -2268,6 +2361,7 @@ export function OfficeScreen({
     };
   }, [
     animationNowMs,
+    danceUntilByAgentId,
     marketplaceGymHoldByAgentId,
     officeTriggerState,
     skillTriggers.movementTargetByAgentId,
@@ -2276,6 +2370,7 @@ export function OfficeScreen({
   const {
     deskHoldByAgentId,
     githubHoldByAgentId,
+    jukeboxHoldByAgentId,
     manualGymUntilByAgentId,
     pendingStandupRequest,
     phoneBoothHoldByAgentId,
@@ -3453,6 +3548,109 @@ export function OfficeScreen({
       }) ?? null,
     [marketplace.skillsReport],
   );
+  const soundclawSkill = useMemo<SkillStatusEntry | null>(
+    () =>
+      marketplace.skillsReport?.skills.find((skill) => {
+        const normalizedKey = skill.skillKey.trim().toLowerCase();
+        const normalizedName = skill.name.trim().toLowerCase();
+        return normalizedKey === "soundclaw" || normalizedName === "soundclaw";
+      }) ?? null,
+    [marketplace.skillsReport],
+  );
+  const soundclawReady = useMemo(
+    () => (soundclawSkill ? deriveSkillReadinessState(soundclawSkill) === "ready" : false),
+    [soundclawSkill]
+  );
+
+  useEffect(() => {
+    if (!soundclawReady || !jukeboxToken) {
+      return;
+    }
+
+    const pending = pendingJukeboxCommandTimeoutsRef.current;
+    const activeAgentIds = new Set<string>();
+
+    for (const agent of state.agents) {
+      if (skillTriggers.movementTargetByAgentId[agent.agentId] !== "jukebox") {
+        continue;
+      }
+
+      const request = getLatestUserRequestForAgent(agent);
+      if (!request) {
+        continue;
+      }
+
+      activeAgentIds.add(agent.agentId);
+      const handledKey = handledJukeboxRequestKeyByAgentIdRef.current[agent.agentId];
+      if (handledKey === request.requestKey) {
+        continue;
+      }
+
+      const existing = pending.get(agent.agentId);
+      if (existing?.requestKey === request.requestKey) {
+        continue;
+      }
+      if (existing) {
+        window.clearTimeout(existing.timeoutId);
+        pending.delete(agent.agentId);
+      }
+
+      const timeoutId = window.setTimeout(() => {
+        void executeBrowserJukeboxCommand(request.text).then((result) => {
+          if (result.ok) {
+            handledJukeboxRequestKeyByAgentIdRef.current[agent.agentId] = request.requestKey;
+            setJukeboxOpen(true);
+            dispatch({
+              type: "appendOutput",
+              agentId: agent.agentId,
+              line: result.reply,
+              transcript: {
+                role: "assistant",
+                kind: "assistant",
+                source: "legacy",
+                sessionKey: agent.sessionKey,
+                timestampMs: Date.now(),
+                confirmed: true,
+              },
+            });
+            dispatch({
+              type: "updateAgent",
+              agentId: agent.agentId,
+              patch: {
+                latestOverride: result.reply,
+                latestOverrideKind: null,
+                latestPreview: result.reply,
+                lastAssistantMessageAt: Date.now(),
+              },
+            });
+          }
+          const latest = pendingJukeboxCommandTimeoutsRef.current.get(agent.agentId);
+          if (latest?.timeoutId === timeoutId) {
+            pendingJukeboxCommandTimeoutsRef.current.delete(agent.agentId);
+          }
+        });
+      }, 1400);
+
+      pending.set(agent.agentId, {
+        requestKey: request.requestKey,
+        timeoutId,
+      });
+    }
+
+    for (const [agentId, pendingEntry] of pending.entries()) {
+      if (activeAgentIds.has(agentId)) continue;
+      window.clearTimeout(pendingEntry.timeoutId);
+      pending.delete(agentId);
+    }
+  }, [
+    jukeboxToken,
+    skillTriggers.movementTargetByAgentId,
+    soundclawReady,
+    state.agents,
+  ]);
+
+  // No longer force-close the jukebox panel when skill is disabled;
+  // the panel handles the disabled state itself.
 
   if (
     !agentsLoaded &&
@@ -3497,6 +3695,7 @@ export function OfficeScreen({
       agent.status === "running" ||
       deskHoldByAgentId[agent.agentId] ||
       gymHoldByAgentId[agent.agentId] ||
+      jukeboxHoldByAgentId[agent.agentId] ||
       phoneBoothHoldByAgentId[agent.agentId] ||
       smsBoothHoldByAgentId[agent.agentId] ||
       qaHoldByAgentId[agent.agentId],
@@ -3526,6 +3725,7 @@ export function OfficeScreen({
           monitorAgentId={monitorAgentId}
           monitorByAgentId={monitorByAgentId}
           githubSkill={githubSkill}
+          soundclawEnabled={soundclawReady}
           officeTitle={officeTitle}
           officeTitleLoaded={officeTitleLoaded}
           remoteOfficeEnabled={remoteOfficeEnabled}
@@ -3615,7 +3815,27 @@ export function OfficeScreen({
           onOpenGithubSkillSetup={() => {
             setMarketplaceOpen(true);
           }}
+          onJukeboxInteract={() => {
+            setJukeboxOpen(true);
+          }}
         />
+        {jukeboxOpen ? (
+          soundclawReady ? (
+            <JukeboxPanel
+              client={client}
+              onClose={() => setJukeboxOpen(false)}
+              selectedAgentName={focusedChatAgent?.name ?? null}
+            />
+          ) : (
+            <JukeboxDisabledPanel
+              onClose={() => setJukeboxOpen(false)}
+              onInstall={() => {
+                setJukeboxOpen(false);
+                setMarketplaceOpen(true);
+              }}
+            />
+          )
+        ) : null}
       </section>
 
       {showEmptyFleetBanner ? (

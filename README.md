@@ -193,6 +193,7 @@ See [`.env.example`](.env.example) for the full local development template.
 
 - The immersive retro office (`/office`) and the Phaser builder (`/office/builder`) are related but still separate stacks.
 - The app keeps gateway secrets out of browser persistent storage, but the current connection flow still loads the upstream URL/token into browser memory at runtime.
+- Local Spotify auth for `SOUNDCLAW` currently stores an access token only. Refresh-token handling is not implemented yet, so local Spotify auth may need to be repeated after the token expires.
 
 ## Troubleshooting
 
@@ -204,6 +205,26 @@ If the UI loads but Connect fails, the problem is usually on the Studio -> Gatew
 - Helpful proxy error codes include `studio.gateway_url_missing`, `studio.gateway_token_missing`, `studio.upstream_error`, and `studio.upstream_closed`.
 
 Marketplace skill installs now use a gateway-native workspace flow and do not require enabling SSH on the user machine.
+
+### Spotify auth on localhost
+
+If you are testing the `SOUNDCLAW` jukebox locally and Spotify OAuth does not accept your `localhost` callback, use an `ngrok` callback bridge:
+
+1. Keep Claw3D running locally on `http://localhost:3000`.
+2. Start `ngrok` for the local Studio server, for example `ngrok http 3000`.
+3. In the jukebox setup UI, paste your public `ngrok` URL into the `ngrok Public URL` field.
+4. In the Spotify developer dashboard, register `https://<your-ngrok-host>/spotify/callback` as the redirect URI.
+5. Complete Spotify sign-in from the jukebox panel.
+
+How it works:
+
+- The main Claw3D app stays on `localhost`, so your normal local office state and agent state remain intact.
+- Spotify redirects to the `ngrok` callback URL.
+- The callback page passes the auth code back to the open local Claw3D window.
+
+Current local limitation:
+
+- Because only the Spotify access token is stored right now, you may need to repeat the `ngrok` auth flow when that token expires during local development.
 
 If you use other advanced gateway-host operations over SSH:
 

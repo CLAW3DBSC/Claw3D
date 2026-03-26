@@ -54,9 +54,16 @@ describe("skill triggers", () => {
   });
 
   it("keeps trigger places and fallback definitions in one central registry", () => {
-    expect(OFFICE_SKILL_TRIGGER_PLACE_REGISTRY.desk.interactionTarget).toBe("desk");
-    expect(OFFICE_SKILL_TRIGGER_PLACE_REGISTRY.github.interactionTarget).toBe("server_room");
-    expect(DEFAULT_SKILL_TRIGGER_FALLBACKS_BY_SKILL_KEY["todo-board"]?.movementTarget).toBe("desk");
+    expect(OFFICE_SKILL_TRIGGER_PLACE_REGISTRY.desk.interactionTarget).toBe(
+      "desk",
+    );
+    expect(OFFICE_SKILL_TRIGGER_PLACE_REGISTRY.github.interactionTarget).toBe(
+      "server_room",
+    );
+    expect(
+      DEFAULT_SKILL_TRIGGER_FALLBACKS_BY_SKILL_KEY["todo-board"]
+        ?.movementTarget,
+    ).toBe("desk");
   });
 
   it("builds animation hold maps from the central place registry", () => {

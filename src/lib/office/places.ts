@@ -3,17 +3,20 @@ export const OFFICE_INTERACTION_TARGETS = [
   "server_room",
   "meeting_room",
   "gym",
+  "jukebox",
   "qa_lab",
   "sms_booth",
   "phone_booth",
 ] as const;
 
-export type OfficeInteractionTargetId = (typeof OFFICE_INTERACTION_TARGETS)[number];
+export type OfficeInteractionTargetId =
+  (typeof OFFICE_INTERACTION_TARGETS)[number];
 
 export const OFFICE_SKILL_TRIGGER_MOVEMENT_TARGETS = [
   "desk",
   "github",
   "gym",
+  "jukebox",
   "qa_lab",
 ] as const;
 
@@ -24,6 +27,7 @@ type OfficeSkillTriggerAnimationHoldKey =
   | "deskHoldByAgentId"
   | "githubHoldByAgentId"
   | "gymHoldByAgentId"
+  | "jukeboxHoldByAgentId"
   | "qaHoldByAgentId";
 
 export const OFFICE_SKILL_TRIGGER_PLACE_REGISTRY: Record<
@@ -50,6 +54,11 @@ export const OFFICE_SKILL_TRIGGER_PLACE_REGISTRY: Record<
     interactionTarget: "gym",
     animationHoldKey: "gymHoldByAgentId",
     alsoSetsSkillGymHold: true,
+  },
+  jukebox: {
+    label: "Jukebox",
+    interactionTarget: "jukebox",
+    animationHoldKey: "jukeboxHoldByAgentId",
   },
   qa_lab: {
     label: "QA Lab",
@@ -85,6 +94,20 @@ export const DEFAULT_SKILL_TRIGGER_FALLBACKS_BY_SKILL_KEY: Record<
     movementTarget: "desk",
     skipIfAlreadyThere: true,
   },
+  soundclaw: {
+    anyPhrases: [
+      "spotify",
+      "play a song",
+      "play this song",
+      "play music",
+      "play a playlist",
+      "find a song",
+      "queue this song",
+      "music link",
+    ],
+    movementTarget: "jukebox",
+    skipIfAlreadyThere: true,
+  },
 };
 
 export const buildOfficeSkillTriggerHoldMaps = (
@@ -93,6 +116,7 @@ export const buildOfficeSkillTriggerHoldMaps = (
   deskHoldByAgentId: Record<string, boolean>;
   githubHoldByAgentId: Record<string, boolean>;
   gymHoldByAgentId: Record<string, boolean>;
+  jukeboxHoldByAgentId: Record<string, boolean>;
   qaHoldByAgentId: Record<string, boolean>;
   skillGymHoldByAgentId: Record<string, boolean>;
 } => {
@@ -100,6 +124,7 @@ export const buildOfficeSkillTriggerHoldMaps = (
     deskHoldByAgentId: {} as Record<string, boolean>,
     githubHoldByAgentId: {} as Record<string, boolean>,
     gymHoldByAgentId: {} as Record<string, boolean>,
+    jukeboxHoldByAgentId: {} as Record<string, boolean>,
     qaHoldByAgentId: {} as Record<string, boolean>,
     skillGymHoldByAgentId: {} as Record<string, boolean>,
   };

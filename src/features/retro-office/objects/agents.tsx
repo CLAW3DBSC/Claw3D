@@ -8,7 +8,10 @@ import {
   WALK_ANIM_SPEED,
 } from "@/features/retro-office/core/constants";
 import { toWorld } from "@/features/retro-office/core/geometry";
-import type { JanitorActor, RenderAgent } from "@/features/retro-office/core/types";
+import type {
+  JanitorActor,
+  RenderAgent,
+} from "@/features/retro-office/core/types";
 import { AgentModelProps } from "@/features/retro-office/objects/types";
 
 export const AgentModel = memo(function AgentModel({
@@ -57,7 +60,7 @@ export const AgentModel = memo(function AgentModel({
   const pos = useRef(new THREE.Vector3(0, 0, 0));
   const resolvedAppearance = useMemo(
     () => appearance ?? createDefaultAgentAvatarProfile(agentId),
-    [agentId, appearance]
+    [agentId, appearance],
   );
 
   useFrame(() => {
@@ -76,6 +79,7 @@ export const AgentModel = memo(function AgentModel({
     while (rotDelta < -Math.PI) rotDelta += Math.PI * 2;
     groupRef.current.rotation.y += rotDelta * 0.12;
     const isWorkout = agent.state === "working_out";
+    const isDancing = agent.state === "dancing";
     const isJanitor = "role" in agent && agent.role === "janitor";
     const janitorTool = isJanitor
       ? (agent as RenderAgent & JanitorActor).janitorTool
@@ -83,31 +87,39 @@ export const AgentModel = memo(function AgentModel({
     const workoutStyle = agent.workoutStyle ?? "lift";
     const frameValue = agent.frame + (agent.phaseOffset ?? 0) / WALK_ANIM_SPEED;
     const walkPhase = Math.sin(frameValue * WALK_ANIM_SPEED);
-    const workoutPhase = Math.sin(agent.frame * 0.18 + (agent.phaseOffset ?? 0));
-    const workoutPushPhase = Math.sin(agent.frame * 0.18 + (agent.phaseOffset ?? 0) + Math.PI / 2);
+    const workoutPhase = Math.sin(
+      agent.frame * 0.18 + (agent.phaseOffset ?? 0),
+    );
+    const workoutPushPhase = Math.sin(
+      agent.frame * 0.18 + (agent.phaseOffset ?? 0) + Math.PI / 2,
+    );
     groupRef.current.rotation.z = 0;
     groupRef.current.rotation.x =
       agent.state === "sitting"
         ? -0.15
-        : isWorkout
-          ? workoutStyle === "bike"
-            ? 0.18
-            : workoutStyle === "row"
-              ? -0.12 + Math.max(0, workoutPhase) * 0.08
-              : workoutStyle === "stretch"
-                ? -0.08
-                : workoutStyle === "run"
-                  ? 0.08
-                  : workoutStyle === "box"
-                    ? 0.04
-                    : 0.02
+        : isDancing
+          ? Math.sin(agent.frame * 0.18 + (agent.phaseOffset ?? 0)) * 0.06
+          : isWorkout
+            ? workoutStyle === "bike"
+              ? 0.18
+              : workoutStyle === "row"
+                ? -0.12 + Math.max(0, workoutPhase) * 0.08
+                : workoutStyle === "stretch"
+                  ? -0.08
+                  : workoutStyle === "run"
+                    ? 0.08
+                    : workoutStyle === "box"
+                      ? 0.04
+                      : 0.02
           : agent.pingPongUntil
             ? 0.08
             : 0;
     const bounce =
       agent.state === "walking"
         ? Math.sin(frameValue * WALK_ANIM_SPEED) * 0.04
-        : isWorkout
+        : isDancing
+          ? 0.03 + Math.abs(Math.sin(agent.frame * 0.22 + (agent.phaseOffset ?? 0))) * 0.05
+          : isWorkout
           ? workoutStyle === "stretch"
             ? 0.012 + Math.abs(workoutPhase) * 0.018
             : workoutStyle === "row"
@@ -129,6 +141,11 @@ export const AgentModel = memo(function AgentModel({
         leftArmRef.current.rotation.z = -0.08;
       } else if (agent.state === "walking") {
         leftArmRef.current.rotation.x = walkPhase * 0.4;
+      } else if (isDancing) {
+        leftArmRef.current.rotation.x = -0.8 + Math.sin(agent.frame * 0.22) * 0.9;
+        leftArmRef.current.rotation.z = -0.45 + Math.cos(agent.frame * 0.16) * 0.18;
+        leftArmRef.current.rotation.y = -0.08;
+        groupRef.current.rotation.z = Math.sin(agent.frame * 0.12) * 0.08;
       } else if (isWorkout) {
         if (workoutStyle === "run") {
           leftArmRef.current.rotation.x = -(0.28 + workoutPhase * 1.05);
@@ -138,11 +155,17 @@ export const AgentModel = memo(function AgentModel({
           leftArmRef.current.rotation.z = -0.18;
           leftArmRef.current.rotation.y = -0.12;
         } else if (workoutStyle === "row") {
-          leftArmRef.current.rotation.x = -(0.95 - Math.max(0, workoutPhase) * 0.7);
+          leftArmRef.current.rotation.x = -(
+            0.95 -
+            Math.max(0, workoutPhase) * 0.7
+          );
           leftArmRef.current.rotation.z = -0.16;
           leftArmRef.current.rotation.y = -0.1;
         } else if (workoutStyle === "box") {
-          leftArmRef.current.rotation.x = -(0.92 + Math.max(0, workoutPushPhase) * 0.45);
+          leftArmRef.current.rotation.x = -(
+            0.92 +
+            Math.max(0, workoutPushPhase) * 0.45
+          );
           leftArmRef.current.rotation.z = -0.52;
           leftArmRef.current.rotation.y = -0.06;
           groupRef.current.rotation.z = 0.05;
@@ -151,12 +174,16 @@ export const AgentModel = memo(function AgentModel({
           leftArmRef.current.rotation.z = -0.42;
           leftArmRef.current.rotation.y = -0.08;
         } else {
-          leftArmRef.current.rotation.x = -(0.28 + Math.abs(workoutPhase) * 0.28);
+          leftArmRef.current.rotation.x = -(
+            0.28 +
+            Math.abs(workoutPhase) * 0.28
+          );
           leftArmRef.current.rotation.z = -0.58;
           leftArmRef.current.rotation.y = -0.12;
         }
       } else if (agent.pingPongUntil) {
-        leftArmRef.current.rotation.x = 0.2 + Math.sin(agent.frame * 0.08) * 0.28;
+        leftArmRef.current.rotation.x =
+          0.2 + Math.sin(agent.frame * 0.08) * 0.28;
       } else if (agent.state === "sitting") {
         leftArmRef.current.rotation.x = 0.3;
       }
@@ -171,6 +198,11 @@ export const AgentModel = memo(function AgentModel({
         rightArmRef.current.rotation.z = 0.08;
       } else if (agent.state === "walking") {
         rightArmRef.current.rotation.x = -walkPhase * 0.4;
+      } else if (isDancing) {
+        rightArmRef.current.rotation.x = -0.8 - Math.sin(agent.frame * 0.22) * 0.9;
+        rightArmRef.current.rotation.z = 0.45 - Math.cos(agent.frame * 0.16) * 0.18;
+        rightArmRef.current.rotation.y = 0.08;
+        groupRef.current.rotation.z = Math.sin(agent.frame * 0.12) * 0.08;
       } else if (isWorkout) {
         if (workoutStyle === "run") {
           rightArmRef.current.rotation.x = -(0.28 - workoutPhase * 1.05);
@@ -180,11 +212,17 @@ export const AgentModel = memo(function AgentModel({
           rightArmRef.current.rotation.z = 0.18;
           rightArmRef.current.rotation.y = 0.12;
         } else if (workoutStyle === "row") {
-          rightArmRef.current.rotation.x = -(0.95 - Math.max(0, -workoutPhase) * 0.7);
+          rightArmRef.current.rotation.x = -(
+            0.95 -
+            Math.max(0, -workoutPhase) * 0.7
+          );
           rightArmRef.current.rotation.z = 0.16;
           rightArmRef.current.rotation.y = 0.1;
         } else if (workoutStyle === "box") {
-          rightArmRef.current.rotation.x = -(0.92 + Math.max(0, -workoutPushPhase) * 0.45);
+          rightArmRef.current.rotation.x = -(
+            0.92 +
+            Math.max(0, -workoutPushPhase) * 0.45
+          );
           rightArmRef.current.rotation.z = 0.52;
           rightArmRef.current.rotation.y = 0.06;
           groupRef.current.rotation.z = -0.05;
@@ -193,12 +231,16 @@ export const AgentModel = memo(function AgentModel({
           rightArmRef.current.rotation.z = 0.42;
           rightArmRef.current.rotation.y = 0.08;
         } else {
-          rightArmRef.current.rotation.x = -(0.28 + Math.abs(workoutPhase) * 0.28);
+          rightArmRef.current.rotation.x = -(
+            0.28 +
+            Math.abs(workoutPhase) * 0.28
+          );
           rightArmRef.current.rotation.z = 0.58;
           rightArmRef.current.rotation.y = 0.12;
         }
       } else if (agent.pingPongUntil) {
-        rightArmRef.current.rotation.x = 0.08 - Math.sin(agent.frame * 0.08) * 0.16;
+        rightArmRef.current.rotation.x =
+          0.08 - Math.sin(agent.frame * 0.08) * 0.16;
       } else if (agent.state === "sitting") {
         rightArmRef.current.rotation.x = 0.3;
       }
@@ -207,7 +249,9 @@ export const AgentModel = memo(function AgentModel({
       leftLegRef.current.rotation.x =
         agent.state === "walking"
           ? walkPhase * 0.35
-          : isWorkout
+          : isDancing
+            ? Math.sin(agent.frame * 0.22 + (agent.phaseOffset ?? 0)) * 0.35
+            : isWorkout
             ? workoutStyle === "run"
               ? workoutPhase * 0.7
               : workoutStyle === "bike"
@@ -225,7 +269,9 @@ export const AgentModel = memo(function AgentModel({
       rightLegRef.current.rotation.x =
         agent.state === "walking"
           ? -walkPhase * 0.35
-          : isWorkout
+          : isDancing
+            ? -Math.sin(agent.frame * 0.22 + (agent.phaseOffset ?? 0)) * 0.35
+            : isWorkout
             ? workoutStyle === "run"
               ? -workoutPhase * 0.7
               : workoutStyle === "bike"
@@ -241,7 +287,7 @@ export const AgentModel = memo(function AgentModel({
     }
 
     const working =
-      agent.state === "sitting" || isWorkout || agent.status === "working";
+      agent.state === "sitting" || isWorkout || isDancing || agent.status === "working";
     const isError = agent.status === "error";
     const isAway = agent.state === "away";
 
@@ -343,7 +389,8 @@ export const AgentModel = memo(function AgentModel({
     const showFrownCorners = isError;
     if (leftMouthCornerRef.current && rightMouthCornerRef.current) {
       leftMouthCornerRef.current.visible = showSmileCorners || showFrownCorners;
-      rightMouthCornerRef.current.visible = showSmileCorners || showFrownCorners;
+      rightMouthCornerRef.current.visible =
+        showSmileCorners || showFrownCorners;
       leftMouthCornerRef.current.position.set(-0.031, 0.434, 0.074);
       rightMouthCornerRef.current.position.set(0.031, 0.434, 0.074);
       if (showFrownCorners) {
@@ -395,7 +442,8 @@ export const AgentModel = memo(function AgentModel({
 
     if (speechBubbleRef.current) {
       const bubbleVisible =
-        !suppressSpeechBubble && (showSpeech || bumpTalking || ambientBubbleVisible);
+        !suppressSpeechBubble &&
+        (showSpeech || bumpTalking || ambientBubbleVisible);
       speechBubbleRef.current.visible = bubbleVisible;
       if (bubbleVisible) {
         if (showSpeech && speechText?.trim()) {
@@ -440,8 +488,13 @@ export const AgentModel = memo(function AgentModel({
       const showBroom = isJanitor && janitorTool === "broom";
       heldCleaningToolRef.current.visible = showBroom;
       if (showBroom) {
-        const sweep = agent.state === "walking" ? Math.sin(agent.frame * 0.08) * 0.08 : 0;
-        heldCleaningToolRef.current.position.set(-0.02, -0.2, 0.08 + sweep * 0.06);
+        const sweep =
+          agent.state === "walking" ? Math.sin(agent.frame * 0.08) * 0.08 : 0;
+        heldCleaningToolRef.current.position.set(
+          -0.02,
+          -0.2,
+          0.08 + sweep * 0.06,
+        );
         heldCleaningToolRef.current.rotation.set(-0.8, 0.18, -0.18);
       }
     }
@@ -712,7 +765,11 @@ export const AgentModel = memo(function AgentModel({
           <boxGeometry args={[0.05, 0.05, 0.05]} />
           <meshLambertMaterial color={skin} />
         </mesh>
-        <group ref={heldPaddleRef} position={[-0.01, -0.21, 0.07]} visible={false}>
+        <group
+          ref={heldPaddleRef}
+          position={[-0.01, -0.21, 0.07]}
+          visible={false}
+        >
           <mesh rotation={[-Math.PI / 2, 0, 0]}>
             <cylinderGeometry args={[0.042, 0.042, 0.012, 18]} />
             <meshStandardMaterial
@@ -746,7 +803,11 @@ export const AgentModel = memo(function AgentModel({
           </mesh>
         </group>
         {/* Vacuum cleaner: larger upright silhouette so it reads clearly in-scene. */}
-        <group ref={heldBucketRef} position={[-0.08, -0.1, 0.18]} visible={false}>
+        <group
+          ref={heldBucketRef}
+          position={[-0.08, -0.1, 0.18]}
+          visible={false}
+        >
           <mesh position={[0, -0.02, 0]}>
             <boxGeometry args={[0.015, 0.3, 0.015]} />
             <meshStandardMaterial color="#555" roughness={0.72} />
@@ -761,11 +822,19 @@ export const AgentModel = memo(function AgentModel({
           </mesh>
           <mesh position={[0.02, -0.11, 0.035]} rotation={[0, Math.PI / 2, 0]}>
             <torusGeometry args={[0.03, 0.005, 10, 18, Math.PI]} />
-            <meshStandardMaterial color="#94a3b8" roughness={0.36} metalness={0.18} />
+            <meshStandardMaterial
+              color="#94a3b8"
+              roughness={0.36}
+              metalness={0.18}
+            />
           </mesh>
         </group>
         {/* Floor scrubber: prominent handle, body, and wide cleaning base. */}
-        <group ref={heldScrubberRef} position={[-0.1, -0.08, 0.2]} visible={false}>
+        <group
+          ref={heldScrubberRef}
+          position={[-0.1, -0.08, 0.2]}
+          visible={false}
+        >
           <mesh position={[0, -0.02, 0]}>
             <boxGeometry args={[0.015, 0.32, 0.015]} />
             <meshStandardMaterial color="#777" roughness={0.7} />
@@ -945,11 +1014,19 @@ export const AgentModel = memo(function AgentModel({
         <boxGeometry args={[0.05, 0.014, 0.01]} />
         <meshBasicMaterial color="#9c4a4a" />
       </mesh>
-      <mesh ref={leftMouthCornerRef} position={[-0.031, 0.438, 0.074]} visible={false}>
+      <mesh
+        ref={leftMouthCornerRef}
+        position={[-0.031, 0.438, 0.074]}
+        visible={false}
+      >
         <boxGeometry args={[0.014, 0.014, 0.01]} />
         <meshBasicMaterial color="#9c4a4a" />
       </mesh>
-      <mesh ref={rightMouthCornerRef} position={[0.031, 0.438, 0.074]} visible={false}>
+      <mesh
+        ref={rightMouthCornerRef}
+        position={[0.031, 0.438, 0.074]}
+        visible={false}
+      >
         <boxGeometry args={[0.014, 0.014, 0.01]} />
         <meshBasicMaterial color="#9c4a4a" />
       </mesh>
