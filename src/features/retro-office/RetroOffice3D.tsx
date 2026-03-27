@@ -4500,7 +4500,7 @@ export function RetroOffice3D({
       const agent = renderAgentLookupRef.current.get(agentId);
       if (!agent) return;
       const tx = item.x + 40;
-      const ty = item.y + 40;
+      const ty = item.y - 5;
       const path = planPath(agent.x, agent.y, tx, ty);
       // Mutate the render agent ref directly so the tick loop picks it up.
       Object.assign(agent, {

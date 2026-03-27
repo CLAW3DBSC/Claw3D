@@ -107,7 +107,7 @@ export const getItemBaseSize = (item: FurnitureItem) => {
  * This is the single source of truth for nav-blocking behaviour. `buildNavGrid` in
  * navigation.ts reads this instead of maintaining its own hardcoded type set.
  */
-export const ITEM_METADATA: Record<string, { blocksNavigation: boolean }> = {
+export const ITEM_METADATA: Record<string, { blocksNavigation: boolean; navPadding?: number }> = {
   // ── structural ────────────────────────────────────────────────────────────
   wall:            { blocksNavigation: true  },
   door:            { blocksNavigation: false }, // passable
@@ -117,7 +117,7 @@ export const ITEM_METADATA: Record<string, { blocksNavigation: boolean }> = {
   couch_v:         { blocksNavigation: true  },
   beanbag:         { blocksNavigation: true  }, // large floor seat (issue #4)
   // ── desks / workstations ──────────────────────────────────────────────────
-  desk_cubicle:    { blocksNavigation: false }, // agents stand at these; collision handled separately
+  desk_cubicle:    { blocksNavigation: true, navPadding: 0 }, // blocks nav with zero padding (tight to desk body)
   executive_desk:  { blocksNavigation: true  },
   // ── tables ────────────────────────────────────────────────────────────────
   round_table:     { blocksNavigation: true  },
