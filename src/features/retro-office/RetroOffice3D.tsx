@@ -76,6 +76,7 @@ import {
   ensureOfficePingPongTable,
   ensureOfficeQaLab,
   ensureOfficeSmsBooth,
+  ensureOfficeJukebox,
   ensureOfficeServerRoom,
   isRetiredPingPongLamp,
   materializeDefaults,
@@ -148,6 +149,7 @@ import type {
 import type { NavGrid } from "@/features/retro-office/core/navigation";
 import type { OfficeLayoutSnapshot } from "@/lib/office/layoutSnapshot";
 import { AgentModel as AgentObjectModel } from "@/features/retro-office/objects/agents";
+import { JukeboxModel as InteractiveJukeboxModel } from "@/features/retro-office/objects/Jukebox";
 import {
   FurnitureModel as GenericFurnitureModel,
   InstancedFurnitureItems as InstancedFurnitureItemsModel,
@@ -359,6 +361,7 @@ const PALETTE: PaletteEntry[] = [
   { type: "fridge", label: "Fridge", icon: "🧊", defaults: { w: 40, h: 80 } },
   { type: "water_cooler", label: "Water", icon: "💧", defaults: {} },
   { type: "atm", label: "ATM", icon: "🏧", defaults: { facing: 270 } },
+  { type: "jukebox", label: "Jukebox", icon: "🎵", defaults: { facing: 0 } },
   {
     type: "whiteboard",
     label: "Whiteboard",
@@ -403,11 +406,7 @@ const PALETTE: PaletteEntry[] = [
 // CAMERA SETUP — sets lookAt after mount
 // ============================================================
 
-function CameraRig({
-  target,
-}: {
-  target: [number, number, number];
-}) {
+function CameraRig({ target }: { target: [number, number, number] }) {
   const { camera } = useThree();
   useEffect(() => {
     camera.lookAt(...target);
@@ -444,8 +443,9 @@ const ReadOnlyFurnitureClone = memo(function ReadOnlyFurnitureClone({
       <InstancedFurnitureItemsModel itemType="desk_cubicle" items={deskItems} />
       <InstancedFurnitureItemsModel itemType="chair" items={chairItems} />
       {furniture.map((item) =>
-        item.type === "wall" || item.type === "desk_cubicle" || item.type === "chair" ? null
-        : item.type === "door" ? (
+        item.type === "wall" ||
+        item.type === "desk_cubicle" ||
+        item.type === "chair" ? null : item.type === "door" ? (
           <PrimitiveDoorModel
             key={item._uid}
             item={item}
@@ -846,6 +846,7 @@ function useAgentTick(
   furnitureRef: React.RefObject<FurnitureItem[]>,
   lastSeenByAgentId: Record<string, number> = {},
   deskHoldByAgentId: Record<string, boolean> = {},
+  danceUntilByAgentId: Record<string, number> = {},
   gymHoldByAgentId: Record<string, boolean> = {},
   smsBoothHoldByAgentId: Record<string, boolean> = {},
   phoneBoothHoldByAgentId: Record<string, boolean> = {},
@@ -882,13 +883,17 @@ function useAgentTick(
   );
   const pickRoamPoint = useCallback((agentId: string) => {
     if (isRemoteOfficeAgentId(agentId)) {
-      return REMOTE_ROAM_POINTS[Math.floor(Math.random() * REMOTE_ROAM_POINTS.length)];
+      return REMOTE_ROAM_POINTS[
+        Math.floor(Math.random() * REMOTE_ROAM_POINTS.length)
+      ];
     }
     return ROAM_POINTS[Math.floor(Math.random() * ROAM_POINTS.length)];
   }, []);
   const pickSpawnPoint = useCallback((agentId: string) => {
     if (isRemoteOfficeAgentId(agentId)) {
-      return REMOTE_ROAM_POINTS[Math.floor(Math.random() * REMOTE_ROAM_POINTS.length)];
+      return REMOTE_ROAM_POINTS[
+        Math.floor(Math.random() * REMOTE_ROAM_POINTS.length)
+      ];
     }
     return {
       x: Math.random() * 800 + 100,
@@ -1046,11 +1051,13 @@ function useAgentTick(
         ? resolveMeetingTarget(agent.id)
         : null;
       const smsBoothItem =
-        (furnitureRef.current ?? []).find((item) => item.type === "sms_booth") ??
-        null;
+        (furnitureRef.current ?? []).find(
+          (item) => item.type === "sms_booth",
+        ) ?? null;
       const phoneBoothItem =
-        (furnitureRef.current ?? []).find((item) => item.type === "phone_booth") ??
-        null;
+        (furnitureRef.current ?? []).find(
+          (item) => item.type === "phone_booth",
+        ) ?? null;
 
       if (agent.status === "working" && !explicitDeskHold && deskPos)
         stickyUntilRef.current.set(agent.id, now + DESK_STICKY_MS);
@@ -1449,19 +1456,19 @@ function useAgentTick(
                         x: smsBoothRoute.targetX,
                         y: smsBoothRoute.targetY,
                       }
-                  : explicitPhoneBoothHold
-                    ? {
-                        x: phoneBoothRoute.targetX,
-                        y: phoneBoothRoute.targetY,
-                      }
-                  : explicitQaHold
-                    ? { x: qaLabRoute.targetX, y: qaLabRoute.targetY }
-                    : explicitGithubHold
+                    : explicitPhoneBoothHold
                       ? {
-                          x: serverRoomRoute.targetX,
-                          y: serverRoomRoute.targetY,
+                          x: phoneBoothRoute.targetX,
+                          y: phoneBoothRoute.targetY,
                         }
-                      : deskPos;
+                      : explicitQaHold
+                        ? { x: qaLabRoute.targetX, y: qaLabRoute.targetY }
+                        : explicitGithubHold
+                          ? {
+                              x: serverRoomRoute.targetX,
+                              y: serverRoomRoute.targetY,
+                            }
+                          : deskPos;
             if (!nextTarget) {
               ns.interactionTarget = undefined;
               ns.serverRoomStage = undefined;
@@ -1486,13 +1493,13 @@ function useAgentTick(
                 ? "gym"
                 : explicitSmsBoothHold
                   ? "sms_booth"
-                : explicitPhoneBoothHold
-                  ? "phone_booth"
-                : explicitQaHold
-                  ? "qa_lab"
-                  : explicitGithubHold
-                    ? "server_room"
-                    : "desk";
+                  : explicitPhoneBoothHold
+                    ? "phone_booth"
+                    : explicitQaHold
+                      ? "qa_lab"
+                      : explicitGithubHold
+                        ? "server_room"
+                        : "desk";
             ns.phoneBoothStage =
               explicitMeetingHold ||
               explicitGymHold ||
@@ -1501,9 +1508,7 @@ function useAgentTick(
                 ? undefined
                 : phoneBoothRoute.stage;
             ns.smsBoothStage =
-              explicitMeetingHold ||
-              explicitGymHold ||
-              !explicitSmsBoothHold
+              explicitMeetingHold || explicitGymHold || !explicitSmsBoothHold
                 ? undefined
                 : smsBoothRoute.stage;
             ns.serverRoomStage = explicitMeetingHold
@@ -1512,11 +1517,11 @@ function useAgentTick(
                 ? undefined
                 : explicitSmsBoothHold
                   ? undefined
-                : explicitPhoneBoothHold
-                  ? undefined
-                : explicitGithubHold
-                  ? serverRoomRoute.stage
-                  : undefined;
+                  : explicitPhoneBoothHold
+                    ? undefined
+                    : explicitGithubHold
+                      ? serverRoomRoute.stage
+                      : undefined;
             ns.gymStage = explicitMeetingHold
               ? undefined
               : explicitGymHold
@@ -1526,11 +1531,11 @@ function useAgentTick(
               ? undefined
               : explicitSmsBoothHold
                 ? undefined
-              : explicitPhoneBoothHold
-                ? undefined
-              : explicitQaHold
-                ? qaLabRoute.stage
-                : undefined;
+                : explicitPhoneBoothHold
+                  ? undefined
+                  : explicitQaHold
+                    ? qaLabRoute.stage
+                    : undefined;
             ns.qaLabStationType = explicitQaHold
               ? qaStationPos.stationType
               : undefined;
@@ -1600,22 +1605,22 @@ function useAgentTick(
                       x: smsBoothRoute.targetX,
                       y: smsBoothRoute.targetY,
                     }
-                : explicitPhoneBoothHold
-                  ? {
-                      x: phoneBoothRoute.targetX,
-                      y: phoneBoothRoute.targetY,
-                    }
-                : explicitQaHold
-                  ? {
-                      x: qaLabRoute.targetX,
-                      y: qaLabRoute.targetY,
-                    }
-                  : explicitGithubHold
+                  : explicitPhoneBoothHold
                     ? {
-                        x: serverRoomRoute.targetX,
-                        y: serverRoomRoute.targetY,
+                        x: phoneBoothRoute.targetX,
+                        y: phoneBoothRoute.targetY,
                       }
-                    : (deskPos ?? { x: sx, y: sy })
+                    : explicitQaHold
+                      ? {
+                          x: qaLabRoute.targetX,
+                          y: qaLabRoute.targetY,
+                        }
+                      : explicitGithubHold
+                        ? {
+                            x: serverRoomRoute.targetX,
+                            y: serverRoomRoute.targetY,
+                          }
+                        : (deskPos ?? { x: sx, y: sy })
             : { x: sx, y: sy };
         ns = {
           x: sx,
@@ -1643,15 +1648,15 @@ function useAgentTick(
               ? "gym"
               : explicitSmsBoothHold
                 ? "sms_booth"
-              : explicitPhoneBoothHold
-                ? "phone_booth"
-              : explicitQaHold
-                ? "qa_lab"
-                : explicitGithubHold
-                  ? "server_room"
-                  : deskPos
-                    ? "desk"
-                    : undefined,
+                : explicitPhoneBoothHold
+                  ? "phone_booth"
+                  : explicitQaHold
+                    ? "qa_lab"
+                    : explicitGithubHold
+                      ? "server_room"
+                      : deskPos
+                        ? "desk"
+                        : undefined,
           smsBoothStage:
             explicitMeetingHold || explicitGymHold || !explicitSmsBoothHold
               ? undefined
@@ -2018,14 +2023,14 @@ function useAgentTick(
               agent.interactionTarget === "sms_booth"
                 ? "standing"
                 : agent.interactionTarget === "phone_booth"
-                ? "standing"
-                : agent.interactionTarget === "server_room"
-                ? "standing"
-                : agent.interactionTarget === "gym"
-                  ? "working_out"
-                  : agent.interactionTarget === "qa_lab"
+                  ? "standing"
+                  : agent.interactionTarget === "server_room"
                     ? "standing"
-                    : "sitting";
+                    : agent.interactionTarget === "gym"
+                      ? "working_out"
+                      : agent.interactionTarget === "qa_lab"
+                        ? "standing"
+                        : "sitting";
             if (agent.interactionTarget === "sms_booth") {
               nf = agent.facing;
             } else if (agent.interactionTarget === "phone_booth") {
@@ -2132,6 +2137,11 @@ function useAgentTick(
         }
       }
 
+      if ((danceUntilByAgentId[agent.id] ?? 0) > now && ns !== "away") {
+        ns = "dancing";
+        npath = [];
+      }
+
       return {
         ...agent,
         x: nx,
@@ -2163,7 +2173,8 @@ function useAgentTick(
       if ("role" in mi && mi.role === "janitor") continue;
       if (
         moved[i].state === "sitting" ||
-        moved[i].state === "working_out"
+        moved[i].state === "working_out" ||
+        moved[i].state === "dancing"
       )
         continue;
       if (moved[i].pingPongUntil !== undefined && moved[i].state !== "walking")
@@ -2178,7 +2189,9 @@ function useAgentTick(
       const bucketY = Math.floor(mi.y / collisionCellSize);
       for (let offsetY = -1; offsetY <= 1; offsetY += 1) {
         for (let offsetX = -1; offsetX <= 1; offsetX += 1) {
-          const bucket = collisionBuckets.get(`${bucketX + offsetX}:${bucketY + offsetY}`);
+          const bucket = collisionBuckets.get(
+            `${bucketX + offsetX}:${bucketY + offsetY}`,
+          );
           if (!bucket) continue;
           for (const j of bucket) {
             if (i === j) continue;
@@ -2246,7 +2259,13 @@ function useAgentTick(
     }
   };
 
-  return { renderAgentsRef, renderAgentLookupRef, tick, deskByAgentRef, planPath };
+  return {
+    renderAgentsRef,
+    renderAgentLookupRef,
+    tick,
+    deskByAgentRef,
+    planPath,
+  };
 }
 
 // ============================================================
@@ -2256,7 +2275,9 @@ function useAgentTick(
 const AWAY_THRESHOLD_MS = 15 * 60 * 1000;
 const COMPACT_AGENT_BADGE_LIMIT = 6;
 
-const estimatePhoneSpeechDurationMs = (text: string | null | undefined): number => {
+const estimatePhoneSpeechDurationMs = (
+  text: string | null | undefined,
+): number => {
   const normalized = text?.trim() ?? "";
   if (!normalized) return 5_000;
   const wordCount = normalized.split(/\s+/).filter(Boolean).length;
@@ -2274,6 +2295,7 @@ const getAgentInitials = (name: string | null | undefined): string => {
 
 export function RetroOffice3D({
   agents,
+  officeCenterSignal = 0,
   animationState = null,
   readOnly = false,
   storageNamespace = "default",
@@ -2293,6 +2315,7 @@ export function RetroOffice3D({
   monitorAgentId = null,
   monitorByAgentId = EMPTY_MONITOR_MAP,
   githubSkill = null,
+  soundclawEnabled = false,
   officeTitle = "Luke Headquarters",
   officeTitleLoaded = false,
   remoteOfficeEnabled = false,
@@ -2340,17 +2363,21 @@ export function RetroOffice3D({
   onTextMessageComplete,
   onQaLabDismiss,
   onOpenGithubSkillSetup,
+  onJukeboxInteract,
 }: {
   agents: OfficeAgent[];
+  officeCenterSignal?: number;
   animationState?: Pick<
     OfficeAnimationState,
     | "cleaningCues"
+    | "danceUntilByAgentId"
     | "deskHoldByAgentId"
     | "githubHoldByAgentId"
     | "gymHoldByAgentId"
     | "phoneBoothHoldByAgentId"
     | "smsBoothHoldByAgentId"
     | "qaHoldByAgentId"
+    | "jukeboxHoldByAgentId"
   > | null;
   readOnly?: boolean;
   storageNamespace?: string;
@@ -2370,6 +2397,7 @@ export function RetroOffice3D({
   monitorAgentId?: string | null;
   monitorByAgentId?: OfficeDeskMonitorMap;
   githubSkill?: SkillStatusEntry | null;
+  soundclawEnabled?: boolean;
   officeTitle?: string;
   officeTitleLoaded?: boolean;
   remoteOfficeEnabled?: boolean;
@@ -2386,7 +2414,9 @@ export function RetroOffice3D({
   voiceRepliesLoaded?: boolean;
   onOfficeTitleChange?: (title: string) => void;
   onRemoteOfficeEnabledChange?: (enabled: boolean) => void;
-  onRemoteOfficeSourceKindChange?: (kind: "presence_endpoint" | "openclaw_gateway") => void;
+  onRemoteOfficeSourceKindChange?: (
+    kind: "presence_endpoint" | "openclaw_gateway",
+  ) => void;
   onRemoteOfficeLabelChange?: (label: string) => void;
   onRemoteOfficePresenceUrlChange?: (url: string) => void;
   onRemoteOfficeGatewayUrlChange?: (url: string) => void;
@@ -2421,8 +2451,11 @@ export function RetroOffice3D({
   onTextMessageComplete?: (agentId: string) => void;
   onQaLabDismiss?: () => void;
   onOpenGithubSkillSetup?: () => void;
+  onJukeboxInteract?: () => void;
 }) {
   const resolvedCleaningCues = animationState?.cleaningCues ?? cleaningCues;
+  const resolvedDanceUntilByAgentId =
+    animationState?.danceUntilByAgentId ?? EMPTY_NUMBER_RECORD;
   const resolvedDeskHoldByAgentId =
     animationState?.deskHoldByAgentId ?? deskHoldByAgentId;
   const resolvedGymHoldByAgentId =
@@ -2438,19 +2471,25 @@ export function RetroOffice3D({
     (githubReviewAgentId
       ? { [githubReviewAgentId]: true }
       : EMPTY_BOOLEAN_RECORD);
+  const resolvedJukeboxHoldByAgentId =
+    animationState?.jukeboxHoldByAgentId ?? EMPTY_BOOLEAN_RECORD;
+  const isJukeboxActive = Object.values(resolvedJukeboxHoldByAgentId).some(Boolean);
+
   const [furniture, setFurniture] = useState<FurnitureItem[]>(() =>
-    ensureOfficeQaLab(
-      ensureOfficeGymRoom(
-        ensureOfficeServerRoom(
-          ensureOfficePhoneBooth(
-            ensureOfficeSmsBooth(
-            ensureOfficeAtm(
-              ensureOfficePingPongTable(
-                (loadFurniture(storageNamespace) ?? materializeDefaults()).filter(
-                  (item) => !isRetiredPingPongLamp(item),
+    ensureOfficeJukebox(
+      ensureOfficeQaLab(
+        ensureOfficeGymRoom(
+          ensureOfficeServerRoom(
+            ensureOfficePhoneBooth(
+              ensureOfficeSmsBooth(
+                ensureOfficeAtm(
+                  ensureOfficePingPongTable(
+                    (
+                      loadFurniture(storageNamespace) ?? materializeDefaults()
+                    ).filter((item) => !isRetiredPingPongLamp(item)),
+                  ),
                 ),
               ),
-            ),
             ),
           ),
         ),
@@ -2473,12 +2512,12 @@ export function RetroOffice3D({
       !remoteOfficeEnabled
         ? EMPTY_FURNITURE_ITEMS
         : remoteLayoutSnapshot
-        ? projectFurnitureIntoRemoteOfficeZone({
-            furniture: remoteLayoutSnapshot.furniture,
-            sourceWidth: remoteLayoutSnapshot.width,
-            sourceHeight: remoteLayoutSnapshot.height,
-          })
-        : defaultRemoteLayoutFurniture,
+          ? projectFurnitureIntoRemoteOfficeZone({
+              furniture: remoteLayoutSnapshot.furniture,
+              sourceWidth: remoteLayoutSnapshot.width,
+              sourceHeight: remoteLayoutSnapshot.height,
+            })
+          : defaultRemoteLayoutFurniture,
     [defaultRemoteLayoutFurniture, remoteLayoutSnapshot, remoteOfficeEnabled],
   );
   const [editMode, setEditMode] = useState(false);
@@ -2572,8 +2611,10 @@ export function RetroOffice3D({
   const [monitorImmersiveReady, setMonitorImmersiveReady] = useState(false);
   const [activeAtmUid, setActiveAtmUid] = useState<string | null>(null);
   const [atmImmersiveReady, setAtmImmersiveReady] = useState(false);
-  const [phoneBoothCommandArrived, setPhoneBoothCommandArrived] = useState(false);
-  const [phoneBoothImmersiveReady, setPhoneBoothImmersiveReady] = useState(false);
+  const [phoneBoothCommandArrived, setPhoneBoothCommandArrived] =
+    useState(false);
+  const [phoneBoothImmersiveReady, setPhoneBoothImmersiveReady] =
+    useState(false);
   const [phoneBoothDoorOpen, setPhoneBoothDoorOpen] = useState(false);
   const [phoneCallStep, setPhoneCallStep] = useState<PhoneCallStep>("dialing");
   const [dialedDigits, setDialedDigits] = useState("");
@@ -2585,9 +2626,9 @@ export function RetroOffice3D({
   const [typedMessageText, setTypedMessageText] = useState("");
   const [activeTextKey, setActiveTextKey] = useState<string | null>(null);
   const [textContacts, setTextContacts] = useState<string[]>([]);
-  const [activeTextContactIndex, setActiveTextContactIndex] = useState<number | null>(
-    null,
-  );
+  const [activeTextContactIndex, setActiveTextContactIndex] = useState<
+    number | null
+  >(null);
   const [manualPhoneBoothOpen, setManualPhoneBoothOpen] = useState(false);
   const [manualPhoneCallScenario, setManualPhoneCallScenario] =
     useState<MockPhoneCallScenario | null>(null);
@@ -2598,14 +2639,17 @@ export function RetroOffice3D({
   const activeTextMessageFlowKeyRef = useRef<string | null>(null);
   const boothAudioCtxRef = useRef<AudioContext | null>(null);
   const effectivePhoneBoothAgentIdRef = useRef<string | null>(null);
-  const effectivePhoneCallScenarioRef = useRef<MockPhoneCallScenario | null>(null);
+  const effectivePhoneCallScenarioRef = useRef<MockPhoneCallScenario | null>(
+    null,
+  );
   const phoneBoothAgentIdRef = useRef<string | null>(null);
   const onPhoneCallSpeakRef = useRef(onPhoneCallSpeak);
   const onPhoneCallCompleteRef = useRef(onPhoneCallComplete);
   const onStandupArrivalsChangeRef = useRef(onStandupArrivalsChange);
   const lastStandupArrivalKeyRef = useRef<string | null>(null);
   const effectiveSmsBoothAgentIdRef = useRef<string | null>(null);
-  const effectiveTextMessageScenarioRef = useRef<MockTextMessageScenario | null>(null);
+  const effectiveTextMessageScenarioRef =
+    useRef<MockTextMessageScenario | null>(null);
   const smsBoothAgentIdRef = useRef<string | null>(null);
   const onTextMessageCompleteRef = useRef(onTextMessageComplete);
   const [activeGithubTerminalUid, setActiveGithubTerminalUid] = useState<
@@ -2732,8 +2776,13 @@ export function RetroOffice3D({
     [agents, janitorActors],
   );
 
-  const { renderAgentsRef, renderAgentLookupRef, tick, deskByAgentRef, planPath } =
-    useAgentTick(
+  const {
+    renderAgentsRef,
+    renderAgentLookupRef,
+    tick,
+    deskByAgentRef,
+    planPath,
+  } = useAgentTick(
     sceneAgents,
     deskLocations,
     assignedDeskIndexByAgentId,
@@ -2743,13 +2792,14 @@ export function RetroOffice3D({
     furnitureRef,
     lastSeenByAgentId,
     resolvedDeskHoldByAgentId,
+    resolvedDanceUntilByAgentId,
     resolvedGymHoldByAgentId,
     resolvedSmsBoothHoldByAgentId,
     resolvedPhoneBoothHoldByAgentId,
     resolvedQaHoldByAgentId,
     resolvedGithubReviewByAgentId,
     standupMeeting,
-    );
+  );
   useEffect(() => {
     const syncRenderAgentUi = () => {
       const next: Record<string, RenderAgentUiSnapshot> = {};
@@ -2773,44 +2823,60 @@ export function RetroOffice3D({
     : null;
   const agentStatusLookup = useMemo(
     () =>
-      agents.reduce<Record<string, { isError: boolean; working: boolean }>>((acc, agent) => {
-        const renderAgent = renderAgentUiById[agent.id];
-        acc[agent.id] = {
-          isError: renderAgent?.status === "error" || agent.status === "error",
-          working:
-            renderAgent?.state === "sitting" ||
-            renderAgent?.status === "working" ||
-            agent.status === "working",
-        };
-        return acc;
-      }, {}),
+      agents.reduce<Record<string, { isError: boolean; working: boolean }>>(
+        (acc, agent) => {
+          const renderAgent = renderAgentUiById[agent.id];
+          acc[agent.id] = {
+            isError:
+              renderAgent?.status === "error" || agent.status === "error",
+            working:
+              renderAgent?.state === "sitting" ||
+              renderAgent?.state === "dancing" ||
+              renderAgent?.status === "working" ||
+              agent.status === "working",
+          };
+          return acc;
+        },
+        {},
+      ),
     [agents, renderAgentUiById],
   );
   const hoveredAgent = useMemo(
-    () => (hoveredAgentId ? agents.find((agent) => agent.id === hoveredAgentId) ?? null : null),
+    () =>
+      hoveredAgentId
+        ? (agents.find((agent) => agent.id === hoveredAgentId) ?? null)
+        : null,
     [agents, hoveredAgentId],
   );
-  const hoveredAgentStatus = hoveredAgentId ? agentStatusLookup[hoveredAgentId] ?? null : null;
+  const hoveredAgentStatus = hoveredAgentId
+    ? (agentStatusLookup[hoveredAgentId] ?? null)
+    : null;
   const handleAgentHover = useCallback((agentId: string) => {
     setHoveredAgentId(agentId);
   }, []);
   const handleAgentUnhover = useCallback(() => {
     setHoveredAgentId(null);
   }, []);
-  const handleAgentClick = useCallback((agentId: string) => {
-    const agent = renderAgentLookupRef.current.get(agentId);
-    if (!agent || !orbitRef.current) return;
-    const [wx, , wz] = toWorld(agent.x, agent.y);
-    orbitRef.current.target.set(wx, 0, wz);
-    orbitRef.current.update();
-    if (isRemoteOfficeAgentId(agentId)) {
-      onAgentChatSelect?.(agentId);
-    }
-  }, [onAgentChatSelect, renderAgentLookupRef]);
-  const handleAgentContextMenu = useCallback((agentId: string, x: number, y: number) => {
-    if (isRemoteOfficeAgentId(agentId)) return;
-    setContextMenu({ id: agentId, x, y });
-  }, []);
+  const handleAgentClick = useCallback(
+    (agentId: string) => {
+      const agent = renderAgentLookupRef.current.get(agentId);
+      if (!agent || !orbitRef.current) return;
+      const [wx, , wz] = toWorld(agent.x, agent.y);
+      orbitRef.current.target.set(wx, 0, wz);
+      orbitRef.current.update();
+      if (isRemoteOfficeAgentId(agentId)) {
+        onAgentChatSelect?.(agentId);
+      }
+    },
+    [onAgentChatSelect, renderAgentLookupRef],
+  );
+  const handleAgentContextMenu = useCallback(
+    (agentId: string, x: number, y: number) => {
+      if (isRemoteOfficeAgentId(agentId)) return;
+      setContextMenu({ id: agentId, x, y });
+    },
+    [],
+  );
   const monitorImmersive = Boolean(activeMonitor && monitorImmersiveReady);
   const serverTerminal = useMemo(
     () => furniture.find((item) => item.type === "server_terminal") ?? null,
@@ -2847,11 +2913,14 @@ export function RetroOffice3D({
     [furniture],
   );
   const effectivePhoneCallScenario =
-    phoneCallScenario ?? (manualPhoneBoothOpen ? manualPhoneCallScenario : null);
+    phoneCallScenario ??
+    (manualPhoneBoothOpen ? manualPhoneCallScenario : null);
   const effectivePhoneBoothAgentId =
-    phoneBoothAgentId ?? (manualPhoneBoothOpen ? "__manual_phone_booth__" : null);
+    phoneBoothAgentId ??
+    (manualPhoneBoothOpen ? "__manual_phone_booth__" : null);
   const phoneBoothViewActive =
-    manualPhoneBoothOpen || Boolean(phoneBoothAgentId && phoneBoothCommandArrived);
+    manualPhoneBoothOpen ||
+    Boolean(phoneBoothAgentId && phoneBoothCommandArrived);
   const activePhoneCallFlowKey = useMemo(() => {
     if (!effectivePhoneBoothAgentId || !effectivePhoneCallScenario) return null;
     return [
@@ -2863,13 +2932,14 @@ export function RetroOffice3D({
   }, [effectivePhoneBoothAgentId, effectivePhoneCallScenario]);
   const phoneBoothImmersive = Boolean(
     activePhoneBooth &&
-      effectivePhoneBoothAgentId &&
-      effectivePhoneCallScenario &&
-      phoneBoothViewActive &&
-      phoneBoothImmersiveReady,
+    effectivePhoneBoothAgentId &&
+    effectivePhoneCallScenario &&
+    phoneBoothViewActive &&
+    phoneBoothImmersiveReady,
   );
   const effectiveTextMessageScenario =
-    textMessageScenario ?? (manualSmsBoothOpen ? manualTextMessageScenario : null);
+    textMessageScenario ??
+    (manualSmsBoothOpen ? manualTextMessageScenario : null);
   const effectiveSmsBoothAgentId =
     smsBoothAgentId ?? (manualSmsBoothOpen ? "__manual_sms_booth__" : null);
   const smsBoothViewActive =
@@ -2885,10 +2955,10 @@ export function RetroOffice3D({
   }, [effectiveSmsBoothAgentId, effectiveTextMessageScenario]);
   const smsBoothImmersive = Boolean(
     activeSmsBooth &&
-      effectiveSmsBoothAgentId &&
-      effectiveTextMessageScenario &&
-      smsBoothViewActive &&
-      smsBoothImmersiveReady,
+    effectiveSmsBoothAgentId &&
+    effectiveTextMessageScenario &&
+    smsBoothViewActive &&
+    smsBoothImmersiveReady,
   );
   const meetingTable = useMemo(
     () =>
@@ -2949,7 +3019,10 @@ export function RetroOffice3D({
     () => agents.slice(0, COMPACT_AGENT_BADGE_LIMIT),
     [agents],
   );
-  const hiddenAgentCount = Math.max(0, agents.length - compactRosterAgents.length);
+  const hiddenAgentCount = Math.max(
+    0,
+    agents.length - compactRosterAgents.length,
+  );
   const standupActive =
     standupMeeting?.phase === "gathering" ||
     standupMeeting?.phase === "in_progress";
@@ -3196,7 +3269,11 @@ export function RetroOffice3D({
   }, [getBoothAudioContext]);
 
   const playTextKeyTone = useCallback(
-    async (options?: { frequency?: number; durationMs?: number; gain?: number }) => {
+    async (options?: {
+      frequency?: number;
+      durationMs?: number;
+      gain?: number;
+    }) => {
       const audioContext = await getBoothAudioContext();
       if (!audioContext) return;
       const now = audioContext.currentTime;
@@ -3271,7 +3348,9 @@ export function RetroOffice3D({
           await audioContext.resume();
         }
         const arrayBuffer = await blob.arrayBuffer();
-        const decoded = await audioContext.decodeAudioData(arrayBuffer.slice(0));
+        const decoded = await audioContext.decodeAudioData(
+          arrayBuffer.slice(0),
+        );
         const source = audioContext.createBufferSource();
         source.buffer = decoded;
         source.connect(audioContext.destination);
@@ -3437,10 +3516,10 @@ export function RetroOffice3D({
         const agent = agentLookup.get(githubReviewAgentId);
         const arrived = Boolean(
           agent &&
-            Math.hypot(
-              agent.x - SERVER_ROOM_TARGET.x,
-              agent.y - SERVER_ROOM_TARGET.y,
-            ) < 16,
+          Math.hypot(
+            agent.x - SERVER_ROOM_TARGET.x,
+            agent.y - SERVER_ROOM_TARGET.y,
+          ) < 16,
         );
         setGithubCommandArrived((current) =>
           current === arrived ? current : arrived,
@@ -3453,11 +3532,13 @@ export function RetroOffice3D({
         const agent = agentLookup.get(qaTestingAgentId);
         const arrived = Boolean(
           agent &&
-            agent.interactionTarget === "qa_lab" &&
-            agent.qaLabStage === "station" &&
-            Math.hypot(agent.x - agent.targetX, agent.y - agent.targetY) < 16,
+          agent.interactionTarget === "qa_lab" &&
+          agent.qaLabStage === "station" &&
+          Math.hypot(agent.x - agent.targetX, agent.y - agent.targetY) < 16,
         );
-        setQaCommandArrived((current) => (current === arrived ? current : arrived));
+        setQaCommandArrived((current) =>
+          current === arrived ? current : arrived,
+        );
       }
 
       if (!phoneBoothAgentId) {
@@ -3469,15 +3550,15 @@ export function RetroOffice3D({
         const agent = agentLookup.get(phoneBoothAgentId);
         const arrived = Boolean(
           agent &&
-            agent.interactionTarget === "phone_booth" &&
-            agent.phoneBoothStage === "receiver" &&
-            Math.hypot(agent.x - agent.targetX, agent.y - agent.targetY) < 16,
+          agent.interactionTarget === "phone_booth" &&
+          agent.phoneBoothStage === "receiver" &&
+          Math.hypot(agent.x - agent.targetX, agent.y - agent.targetY) < 16,
         );
         const doorOpen = Boolean(
           agent &&
-            agent.interactionTarget === "phone_booth" &&
-            agent.phoneBoothStage !== undefined &&
-            agent.phoneBoothStage !== "door_outer",
+          agent.interactionTarget === "phone_booth" &&
+          agent.phoneBoothStage !== undefined &&
+          agent.phoneBoothStage !== "door_outer",
         );
         setPhoneBoothCommandArrived((current) =>
           current === arrived ? current : arrived,
@@ -3496,20 +3577,22 @@ export function RetroOffice3D({
         const agent = agentLookup.get(smsBoothAgentId);
         const arrived = Boolean(
           agent &&
-            agent.interactionTarget === "sms_booth" &&
-            agent.smsBoothStage === "typing" &&
-            Math.hypot(agent.x - agent.targetX, agent.y - agent.targetY) < 16,
+          agent.interactionTarget === "sms_booth" &&
+          agent.smsBoothStage === "typing" &&
+          Math.hypot(agent.x - agent.targetX, agent.y - agent.targetY) < 16,
         );
         const doorOpen = Boolean(
           agent &&
-            agent.interactionTarget === "sms_booth" &&
-            agent.smsBoothStage !== undefined &&
-            agent.smsBoothStage !== "door_outer",
+          agent.interactionTarget === "sms_booth" &&
+          agent.smsBoothStage !== undefined &&
+          agent.smsBoothStage !== "door_outer",
         );
         setSmsBoothCommandArrived((current) =>
           current === arrived ? current : arrived,
         );
-        setSmsBoothDoorOpen((current) => (current === doorOpen ? current : doorOpen));
+        setSmsBoothDoorOpen((current) =>
+          current === doorOpen ? current : doorOpen,
+        );
       }
 
       if (!standupActive || !standupMeeting) {
@@ -3520,11 +3603,16 @@ export function RetroOffice3D({
         return;
       }
 
-      const arrivedParticipants = standupMeeting.participantOrder.filter((agentId) => {
-        const agent = agentLookup.get(agentId);
-        if (!agent || agent.interactionTarget !== "meeting_room") return false;
-        return Math.hypot(agent.x - agent.targetX, agent.y - agent.targetY) < 18;
-      });
+      const arrivedParticipants = standupMeeting.participantOrder.filter(
+        (agentId) => {
+          const agent = agentLookup.get(agentId);
+          if (!agent || agent.interactionTarget !== "meeting_room")
+            return false;
+          return (
+            Math.hypot(agent.x - agent.targetX, agent.y - agent.targetY) < 18
+          );
+        },
+      );
       const nextArrivalsKey = arrivedParticipants.join("|");
       if (lastStandupArrivalKeyRef.current === nextArrivalsKey) return;
       lastStandupArrivalKeyRef.current = nextArrivalsKey;
@@ -3667,7 +3755,10 @@ export function RetroOffice3D({
         if (pressedKey) {
           pulseKeyboardKey(pressedKey);
         }
-        if (index >= (scenario.messageText?.length ?? 0) && typingTimer !== null) {
+        if (
+          index >= (scenario.messageText?.length ?? 0) &&
+          typingTimer !== null
+        ) {
           window.clearInterval(typingTimer);
           typingTimer = null;
           clearActiveKey();
@@ -3758,7 +3849,12 @@ export function RetroOffice3D({
       zoom: 228,
     };
     prevSmsBoothViewRef.current = activeViewKey;
-  }, [activeSmsBooth, manualSmsBoothOpen, smsBoothAgentId, smsBoothCommandArrived]);
+  }, [
+    activeSmsBooth,
+    manualSmsBoothOpen,
+    smsBoothAgentId,
+    smsBoothCommandArrived,
+  ]);
 
   useEffect(() => {
     const resetTimer = window.setTimeout(() => {
@@ -3842,7 +3938,9 @@ export function RetroOffice3D({
                   setPhoneCallStep("complete");
                   stageTimer = window.setTimeout(() => {
                     if (phoneBoothAgentIdRef.current) {
-                      onPhoneCallCompleteRef.current?.(phoneBoothAgentIdRef.current);
+                      onPhoneCallCompleteRef.current?.(
+                        phoneBoothAgentIdRef.current,
+                      );
                     } else {
                       closeManualPhoneBoothView();
                     }
@@ -3876,12 +3974,11 @@ export function RetroOffice3D({
   ]);
 
   useEffect(() => {
-    const activeViewKey =
-      manualPhoneBoothOpen
-        ? "manual"
-        : phoneBoothAgentId && phoneBoothCommandArrived
-          ? `agent:${phoneBoothAgentId}`
-          : null;
+    const activeViewKey = manualPhoneBoothOpen
+      ? "manual"
+      : phoneBoothAgentId && phoneBoothCommandArrived
+        ? `agent:${phoneBoothAgentId}`
+        : null;
     if (!activeViewKey && prevPhoneBoothViewRef.current) {
       cameraPresetRef.current = CAMERA_PRESET_MAP.overview;
     }
@@ -3900,7 +3997,12 @@ export function RetroOffice3D({
       zoom: 210,
     };
     prevPhoneBoothViewRef.current = activeViewKey;
-  }, [activePhoneBooth, manualPhoneBoothOpen, phoneBoothAgentId, phoneBoothCommandArrived]);
+  }, [
+    activePhoneBooth,
+    manualPhoneBoothOpen,
+    phoneBoothAgentId,
+    phoneBoothCommandArrived,
+  ]);
 
   useEffect(() => {
     const resetTimer = window.setTimeout(() => {
@@ -4850,11 +4952,29 @@ export function RetroOffice3D({
   // Camera constants.
   const CAM_POS = DISTRICT_CAMERA_POSITION;
   const LOCAL_CAMERA_TARGET = useMemo(
-    () => toWorld(LOCAL_OFFICE_CANVAS_WIDTH / 2, LOCAL_OFFICE_CANVAS_HEIGHT / 2),
+    () =>
+      toWorld(LOCAL_OFFICE_CANVAS_WIDTH / 2, LOCAL_OFFICE_CANVAS_HEIGHT / 2),
     [],
   );
-  const cameraTarget = remoteOfficeEnabled ? DISTRICT_CAMERA_TARGET : LOCAL_CAMERA_TARGET;
+  const cameraTarget = remoteOfficeEnabled
+    ? DISTRICT_CAMERA_TARGET
+    : LOCAL_CAMERA_TARGET;
   const cameraZoom = remoteOfficeEnabled ? DISTRICT_CAMERA_ZOOM : 56;
+  const lastOfficeCenterSignalRef = useRef(officeCenterSignal);
+
+  useEffect(() => {
+    cameraPresetRef.current = {
+      pos: CAM_POS,
+      target: cameraTarget,
+      zoom: cameraZoom,
+    };
+  }, [CAM_POS, cameraTarget, cameraZoom]);
+
+  useEffect(() => {
+    if (officeCenterSignal === lastOfficeCenterSignalRef.current) return;
+    lastOfficeCenterSignalRef.current = officeCenterSignal;
+    cameraPresetRef.current = CAMERA_PRESET_MAP.overview;
+  }, [officeCenterSignal]);
 
   return (
     <div className="relative w-full h-full bg-[#1a1008] font-mono text-white overflow-hidden">
@@ -4883,7 +5003,12 @@ export function RetroOffice3D({
           <Canvas
             orthographic
             dpr={[0.85, 1.5]}
-            camera={{ position: CAM_POS, zoom: cameraZoom, near: 0.1, far: 100 }}
+            camera={{
+              position: CAM_POS,
+              zoom: cameraZoom,
+              near: 0.1,
+              far: 100,
+            }}
             shadows={{ type: THREE.PCFShadowMap }}
             gl={{ antialias: true, powerPreference: "high-performance" }}
             style={{ width: "100%", height: "100%" }}
@@ -4891,606 +5016,629 @@ export function RetroOffice3D({
               if (drag.kind === "moving") setDrag({ kind: "idle" });
             }}
           >
-          {/* Ensure camera looks at origin after mount. */}
-          <CameraRig target={cameraTarget} />
-          <AdaptiveDprController />
+            {/* Ensure camera looks at origin after mount. */}
+            <CameraRig target={cameraTarget} />
+            <AdaptiveDprController />
 
-          {/* Orbit / pan / zoom controls — disabled while follow cam is active or while editing furniture. */}
-          <OrbitControls
-            ref={orbitRef}
-            enabled={followAgentId === null && (!editMode || spaceDown)}
-            enableDamping
-            dampingFactor={0.08}
-            rotateSpeed={0.6}
-            zoomSpeed={0.8}
-            panSpeed={0.6}
-            minZoom={25}
-            maxZoom={120}
-            maxPolarAngle={Math.PI / 2.2}
-            enableRotate={!spaceDown}
-            mouseButtons={{
-              LEFT: spaceDown ? THREE.MOUSE.PAN : THREE.MOUSE.ROTATE,
-              MIDDLE: THREE.MOUSE.DOLLY,
-              RIGHT: THREE.MOUSE.PAN,
-            }}
-          />
-
-          {/* Game loop — no React state, pure ref mutations. */}
-          <SceneGameLoop tick={tick} />
-
-          {/* New Idea 2: Camera preset animator. */}
-          <CameraPresetAnimator
-            presetRef={cameraPresetRef}
-            orbitRef={orbitRef}
-          />
-
-          {/* Follow cam: third-person perspective camera trailing the selected agent. */}
-          <FollowCamSystem
-            followRef={followAgentIdRef}
-            agentsRef={renderAgentsRef}
-            agentLookupRef={renderAgentLookupRef}
-          />
-
-          {/* E3 Idea 3: Spotlight effect on agent chip click. */}
-          <SceneSpotlightEffect
-            agentId={spotlightAgentId}
-            agentsRef={renderAgentsRef}
-            agentLookupRef={renderAgentLookupRef}
-          />
-
-          {/* Keep office lighting static to avoid extra scene churn from ambience effects. */}
-          <ambientLight intensity={0.72} color="#d8d4c8" />
-          <directionalLight
-            position={[8, 14, 6]}
-            intensity={1.1}
-            color="#f6f1e6"
-            castShadow
-            shadow-mapSize={[1024, 1024]}
-            shadow-bias={-0.0002}
-            shadow-normalBias={0.02}
-          />
-          <directionalLight
-            position={[-5, 8, -4]}
-            intensity={0.4}
-            color="#7090ff"
-          />
-
-          {/* Floor + walls — always visible, no async loading. */}
-          <SceneFloorAndWalls showRemoteOffice={remoteOfficeEnabled} />
-
-          {/* Wall pictures — procedural, no async loading. */}
-          <SceneWallPictures showRemoteOffice={remoteOfficeEnabled} />
-
-          {/* Environment lighting — async, wrapped in its own Suspense so floor stays visible. */}
-          <Suspense fallback={null}>
-            <Environment preset="city" />
-          </Suspense>
-
-          {/* Furniture models — each loads its GLB asynchronously. */}
-          <Suspense fallback={null}>
-            {!editMode ? (
-              <PrimitiveInstancedWallSegmentsModel items={wallItems} />
-            ) : null}
-            {!editMode ? (
-              <InstancedFurnitureItemsModel
-                itemType="desk_cubicle"
-                items={deskItems}
-                onItemClick={handleDeskClick}
-              />
-            ) : null}
-            {!editMode ? (
-              <InstancedFurnitureItemsModel itemType="chair" items={chairItems} />
-            ) : null}
-            {furniture.map((item) =>
-              item.type === "wall" ? (
-                editMode ? (
-                <PrimitiveWallSegmentModel
-                  key={item._uid}
-                  item={item}
-                  isSelected={item._uid === selectedUid}
-                  isHovered={item._uid === hoverUid}
-                  editMode={editMode}
-                  onPointerDown={handleFurniturePointerDown}
-                  onPointerOver={handleFurniturePointerOver}
-                  onPointerOut={handleFurniturePointerOut}
-                />
-                ) : null
-              ) : item.type === "desk_cubicle" ? (
-                editMode ? (
-                  <GenericFurnitureModel
-                    key={item._uid}
-                    item={item}
-                    isSelected={item._uid === selectedUid}
-                    isHovered={item._uid === hoverUid}
-                    editMode={editMode}
-                    onPointerDown={handleFurniturePointerDown}
-                    onPointerOver={handleFurniturePointerOver}
-                    onPointerOut={handleFurniturePointerOut}
-                    onClick={handleDeskClick}
-                  />
-                ) : null
-              ) : item.type === "chair" ? (
-                editMode ? (
-                  <GenericFurnitureModel
-                    key={item._uid}
-                    item={item}
-                    isSelected={item._uid === selectedUid}
-                    isHovered={item._uid === hoverUid}
-                    editMode={editMode}
-                    onPointerDown={handleFurniturePointerDown}
-                    onPointerOver={handleFurniturePointerOver}
-                    onPointerOut={handleFurniturePointerOut}
-                    onClick={handleDeskClick}
-                  />
-                ) : null
-              ) : item.type === "door" ? (
-                <PrimitiveDoorModel
-                  key={item._uid}
-                  item={item}
-                  isSelected={item._uid === selectedUid}
-                  isHovered={item._uid === hoverUid}
-                  editMode={editMode}
-                  agentsRef={renderAgentsRef}
-                  onPointerDown={handleFurniturePointerDown}
-                  onPointerOver={handleFurniturePointerOver}
-                  onPointerOut={handleFurniturePointerOut}
-                />
-              ) : item.type === "round_table" ? (
-                <PrimitiveRoundTableModel
-                  key={item._uid}
-                  item={item}
-                  isSelected={item._uid === selectedUid}
-                  isHovered={item._uid === hoverUid}
-                  editMode={editMode}
-                  onPointerDown={handleFurniturePointerDown}
-                  onPointerOver={handleFurniturePointerOver}
-                  onPointerOut={handleFurniturePointerOut}
-                  onClick={handleDeskClick}
-                />
-              ) : item.type === "keyboard" ? (
-                <PrimitiveKeyboardModel
-                  key={item._uid}
-                  item={item}
-                  editMode={editMode}
-                  onPointerDown={handleFurniturePointerDown}
-                  onPointerOver={handleFurniturePointerOver}
-                  onPointerOut={handleFurniturePointerOut}
-                />
-              ) : item.type === "mouse" ? (
-                <PrimitiveMouseModel
-                  key={item._uid}
-                  item={item}
-                  editMode={editMode}
-                  onPointerDown={handleFurniturePointerDown}
-                  onPointerOver={handleFurniturePointerOver}
-                  onPointerOut={handleFurniturePointerOut}
-                />
-              ) : item.type === "trash" ? (
-                <PrimitiveTrashCanModel
-                  key={item._uid}
-                  item={item}
-                  editMode={editMode}
-                  onPointerDown={handleFurniturePointerDown}
-                  onPointerOver={handleFurniturePointerOver}
-                  onPointerOut={handleFurniturePointerOut}
-                />
-              ) : item.type === "mug" ? (
-                <PrimitiveMugModel
-                  key={item._uid}
-                  item={item}
-                  editMode={editMode}
-                  onPointerDown={handleFurniturePointerDown}
-                  onPointerOver={handleFurniturePointerOver}
-                  onPointerOut={handleFurniturePointerOut}
-                />
-              ) : item.type === "clock" ? (
-                <PrimitiveClockModel
-                  key={item._uid}
-                  item={item}
-                  editMode={editMode}
-                  onPointerDown={handleFurniturePointerDown}
-                  onPointerOver={handleFurniturePointerOver}
-                  onPointerOut={handleFurniturePointerOut}
-                />
-              ) : item.type === "atm" ? (
-                <InteractiveAtmMachineModel
-                  key={item._uid}
-                  item={item}
-                  isSelected={item._uid === selectedUid}
-                  isHovered={item._uid === hoverUid}
-                  editMode={editMode}
-                  onPointerDown={handleFurniturePointerDown}
-                  onPointerOver={handleFurniturePointerOver}
-                  onPointerOut={handleFurniturePointerOut}
-                  onClick={handleDeskClick}
-                />
-              ) : item.type === "sms_booth" ? (
-                <InteractiveSmsBoothModel
-                  key={item._uid}
-                  item={item}
-                  isSelected={item._uid === selectedUid}
-                  isHovered={item._uid === hoverUid}
-                  editMode={editMode}
-                  doorOpen={smsBoothDoorOpen}
-                  onPointerDown={handleFurniturePointerDown}
-                  onPointerOver={handleFurniturePointerOver}
-                  onPointerOut={handleFurniturePointerOut}
-                  onClick={handleDeskClick}
-                />
-              ) : item.type === "phone_booth" ? (
-                <InteractivePhoneBoothModel
-                  key={item._uid}
-                  item={item}
-                  isSelected={item._uid === selectedUid}
-                  isHovered={item._uid === hoverUid}
-                  editMode={editMode}
-                  doorOpen={phoneBoothDoorOpen}
-                  onPointerDown={handleFurniturePointerDown}
-                  onPointerOver={handleFurniturePointerOver}
-                  onPointerOut={handleFurniturePointerOut}
-                  onClick={handleDeskClick}
-                />
-              ) : item.type === "server_rack" ? (
-                <InteractiveServerRackModel
-                  key={item._uid}
-                  item={item}
-                  isSelected={item._uid === selectedUid}
-                  isHovered={item._uid === hoverUid}
-                  editMode={editMode}
-                  onPointerDown={handleFurniturePointerDown}
-                  onPointerOver={handleFurniturePointerOver}
-                  onPointerOut={handleFurniturePointerOut}
-                  onClick={handleDeskClick}
-                />
-              ) : item.type === "server_terminal" ? (
-                <InteractiveServerTerminalModel
-                  key={item._uid}
-                  item={item}
-                  isSelected={item._uid === selectedUid}
-                  isHovered={item._uid === hoverUid}
-                  editMode={editMode}
-                  onPointerDown={handleFurniturePointerDown}
-                  onPointerOver={handleFurniturePointerOver}
-                  onPointerOut={handleFurniturePointerOut}
-                  onClick={handleDeskClick}
-                />
-              ) : item.type === "vending" ? (
-                <KitchenVendingMachineModel
-                  key={item._uid}
-                  item={item}
-                  editMode={editMode}
-                  onPointerDown={handleFurniturePointerDown}
-                  onPointerOver={handleFurniturePointerOver}
-                  onPointerOut={handleFurniturePointerOut}
-                />
-              ) : item.type === "sink" ? (
-                <KitchenSinkModel
-                  key={item._uid}
-                  item={item}
-                  editMode={editMode}
-                  onPointerDown={handleFurniturePointerDown}
-                  onPointerOver={handleFurniturePointerOver}
-                  onPointerOut={handleFurniturePointerOut}
-                />
-              ) : item.type === "dishwasher" ? (
-                <KitchenDishwasherModel
-                  key={item._uid}
-                  item={item}
-                  editMode={editMode}
-                  onPointerDown={handleFurniturePointerDown}
-                  onPointerOver={handleFurniturePointerOver}
-                  onPointerOut={handleFurniturePointerOut}
-                />
-              ) : item.type === "pingpong" ? (
-                <MachinePingPongTableModel
-                  key={item._uid}
-                  item={item}
-                  isSelected={item._uid === selectedUid}
-                  isHovered={item._uid === hoverUid}
-                  editMode={editMode}
-                  onPointerDown={handleFurniturePointerDown}
-                  onPointerOver={handleFurniturePointerOver}
-                  onPointerOut={handleFurniturePointerOut}
-                  onClick={handleDeskClick}
-                />
-              ) : item.type === "qa_terminal" ? (
-                <InteractiveQaTerminalModel
-                  key={item._uid}
-                  item={item}
-                  isSelected={item._uid === selectedUid}
-                  isHovered={item._uid === hoverUid}
-                  editMode={editMode}
-                  onPointerDown={handleFurniturePointerDown}
-                  onPointerOver={handleFurniturePointerOver}
-                  onPointerOut={handleFurniturePointerOut}
-                  onClick={handleDeskClick}
-                />
-              ) : item.type === "device_rack" ? (
-                <InteractiveDeviceRackModel
-                  key={item._uid}
-                  item={item}
-                  isSelected={item._uid === selectedUid}
-                  isHovered={item._uid === hoverUid}
-                  editMode={editMode}
-                  onPointerDown={handleFurniturePointerDown}
-                  onPointerOver={handleFurniturePointerOver}
-                  onPointerOut={handleFurniturePointerOut}
-                  onClick={handleDeskClick}
-                />
-              ) : item.type === "test_bench" ? (
-                <InteractiveTestBenchModel
-                  key={item._uid}
-                  item={item}
-                  isSelected={item._uid === selectedUid}
-                  isHovered={item._uid === hoverUid}
-                  editMode={editMode}
-                  onPointerDown={handleFurniturePointerDown}
-                  onPointerOver={handleFurniturePointerOver}
-                  onPointerOut={handleFurniturePointerOut}
-                  onClick={handleDeskClick}
-                />
-              ) : item.type === "treadmill" ? (
-                <InteractiveTreadmillModel
-                  key={item._uid}
-                  item={item}
-                  isSelected={item._uid === selectedUid}
-                  isHovered={item._uid === hoverUid}
-                  editMode={editMode}
-                  onPointerDown={handleFurniturePointerDown}
-                  onPointerOver={handleFurniturePointerOver}
-                  onPointerOut={handleFurniturePointerOut}
-                  onClick={handleDeskClick}
-                />
-              ) : item.type === "weight_bench" ? (
-                <InteractiveWeightBenchModel
-                  key={item._uid}
-                  item={item}
-                  isSelected={item._uid === selectedUid}
-                  isHovered={item._uid === hoverUid}
-                  editMode={editMode}
-                  onPointerDown={handleFurniturePointerDown}
-                  onPointerOver={handleFurniturePointerOver}
-                  onPointerOut={handleFurniturePointerOut}
-                  onClick={handleDeskClick}
-                />
-              ) : item.type === "dumbbell_rack" ? (
-                <InteractiveDumbbellRackModel
-                  key={item._uid}
-                  item={item}
-                  isSelected={item._uid === selectedUid}
-                  isHovered={item._uid === hoverUid}
-                  editMode={editMode}
-                  onPointerDown={handleFurniturePointerDown}
-                  onPointerOver={handleFurniturePointerOver}
-                  onPointerOut={handleFurniturePointerOut}
-                  onClick={handleDeskClick}
-                />
-              ) : item.type === "exercise_bike" ? (
-                <InteractiveExerciseBikeModel
-                  key={item._uid}
-                  item={item}
-                  isSelected={item._uid === selectedUid}
-                  isHovered={item._uid === hoverUid}
-                  editMode={editMode}
-                  onPointerDown={handleFurniturePointerDown}
-                  onPointerOver={handleFurniturePointerOver}
-                  onPointerOut={handleFurniturePointerOut}
-                  onClick={handleDeskClick}
-                />
-              ) : item.type === "rowing_machine" ? (
-                <InteractiveRowingMachineModel
-                  key={item._uid}
-                  item={item}
-                  isSelected={item._uid === selectedUid}
-                  isHovered={item._uid === hoverUid}
-                  editMode={editMode}
-                  onPointerDown={handleFurniturePointerDown}
-                  onPointerOver={handleFurniturePointerOver}
-                  onPointerOut={handleFurniturePointerOut}
-                  onClick={handleDeskClick}
-                />
-              ) : item.type === "kettlebell_rack" ? (
-                <InteractiveKettlebellRackModel
-                  key={item._uid}
-                  item={item}
-                  isSelected={item._uid === selectedUid}
-                  isHovered={item._uid === hoverUid}
-                  editMode={editMode}
-                  onPointerDown={handleFurniturePointerDown}
-                  onPointerOver={handleFurniturePointerOver}
-                  onPointerOut={handleFurniturePointerOut}
-                  onClick={handleDeskClick}
-                />
-              ) : item.type === "punching_bag" ? (
-                <InteractivePunchingBagModel
-                  key={item._uid}
-                  item={item}
-                  isSelected={item._uid === selectedUid}
-                  isHovered={item._uid === hoverUid}
-                  editMode={editMode}
-                  onPointerDown={handleFurniturePointerDown}
-                  onPointerOver={handleFurniturePointerOver}
-                  onPointerOut={handleFurniturePointerOut}
-                  onClick={handleDeskClick}
-                />
-              ) : item.type === "yoga_mat" ? (
-                <InteractiveYogaMatModel
-                  key={item._uid}
-                  item={item}
-                  isSelected={item._uid === selectedUid}
-                  isHovered={item._uid === hoverUid}
-                  editMode={editMode}
-                  onPointerDown={handleFurniturePointerDown}
-                  onPointerOver={handleFurniturePointerOver}
-                  onPointerOut={handleFurniturePointerOut}
-                  onClick={handleDeskClick}
-                />
-              ) : item.type === "stove" ? (
-                <KitchenStoveModel
-                  key={item._uid}
-                  item={item}
-                  editMode={editMode}
-                  onPointerDown={handleFurniturePointerDown}
-                  onPointerOver={handleFurniturePointerOver}
-                  onPointerOut={handleFurniturePointerOut}
-                />
-              ) : item.type === "microwave" ? (
-                <KitchenMicrowaveModel
-                  key={item._uid}
-                  item={item}
-                  editMode={editMode}
-                  onPointerDown={handleFurniturePointerDown}
-                  onPointerOver={handleFurniturePointerOver}
-                  onPointerOut={handleFurniturePointerOut}
-                />
-              ) : item.type === "wall_cabinet" ? (
-                <KitchenWallCabinetModel
-                  key={item._uid}
-                  item={item}
-                  editMode={editMode}
-                  onPointerDown={handleFurniturePointerDown}
-                  onPointerOver={handleFurniturePointerOver}
-                  onPointerOut={handleFurniturePointerOut}
-                />
-              ) : (
-                <GenericFurnitureModel
-                  key={item._uid}
-                  item={item}
-                  isSelected={item._uid === selectedUid}
-                  isHovered={item._uid === hoverUid}
-                  editMode={editMode}
-                  onPointerDown={handleFurniturePointerDown}
-                  onPointerOver={handleFurniturePointerOver}
-                  onPointerOut={handleFurniturePointerOut}
-                  onClick={handleDeskClick}
-                />
-              ),
-            )}
-          </Suspense>
-
-          {remoteLayoutFurniture.length > 0 ? (
-            <ReadOnlyFurnitureClone furniture={remoteLayoutFurniture} />
-          ) : null}
-
-          {/* Agents — purely imperative, driven by renderAgentsRef inside useFrame. */}
-          {sceneAgents.map((agent) => {
-            const isJanitor = "role" in agent && agent.role === "janitor";
-            return (
-              <AgentObjectModel
-                key={agent.id}
-                agentId={agent.id}
-                name={agent.name}
-                status={agent.status}
-                color={agentColorMap.get(agent.id) ?? "#888"}
-                appearance={"avatarProfile" in agent ? agent.avatarProfile ?? null : null}
-                agentsRef={renderAgentsRef}
-                agentLookupRef={renderAgentLookupRef}
-                onHover={isJanitor ? undefined : handleAgentHover}
-                onUnhover={isJanitor ? undefined : handleAgentUnhover}
-                onClick={isJanitor ? undefined : handleAgentClick}
-                onContextMenu={isJanitor ? undefined : handleAgentContextMenu}
-                showSpeech={
-                  isJanitor
-                    ? false
-                    : standupMeeting?.phase === "in_progress"
-                      ? Boolean(standupSpeechTextByAgentId[agent.id])
-                      : speechAgentIds.has(agent.id)
-                }
-                speechText={
-                  isJanitor
-                    ? null
-                    : standupMeeting?.phase === "in_progress"
-                      ? (standupSpeechTextByAgentId[agent.id] ?? null)
-                      : (speechTextByAgentId[agent.id] ?? null)
-                }
-                suppressSpeechBubble={
-                  suppressSceneSpeechBubbles &&
-                  standupMeeting?.currentSpeakerAgentId !== agent.id
-                }
-              />
-            );
-          })}
-
-          <ScenePingPongBall agentsRef={renderAgentsRef} />
-
-          {/* Idea 7: Desk nameplates — small labels showing assigned agent above each desk. */}
-          <DeskNameplateOverlay
-            deskLocations={deskLocations}
-            agents={agents}
-            deskByAgentRef={deskByAgentRef}
-          />
-
-          {/* New Idea 5: Agent color trails while walking. */}
-          {trailMode ? (
-            <AgentTrailSystem
-              agentsRef={renderAgentsRef}
-              colorMap={agentColorMap}
-            />
-          ) : null}
-
-          {/* New Idea 7: Heatmap overlay when heatmap mode is active. */}
-          {heatmapMode ? (
-            <AgentHeatmapSystem
-              agentsRef={renderAgentsRef}
-              heatmapMode={heatmapMode}
-              heatGridRef={heatGridRef}
-            />
-          ) : null}
-
-          {/* Placement ghost. */}
-          {editMode &&
-            drag.kind === "placing" &&
-            drag.itemType !== "wall" &&
-            ghostPos && (
-              <Suspense fallback={null}>
-                <FurniturePlacementGhost
-                  itemType={drag.itemType}
-                  position={ghostPos}
-                />
-              </Suspense>
-            )}
-          {editMode &&
-          drag.kind === "placing" &&
-          drag.itemType === "wall" &&
-          wallGhostItem ? (
-            <PrimitiveWallSegmentModel
-              item={wallGhostItem}
-              isSelected={false}
-              isHovered={false}
-              editMode={false}
-              onPointerDown={() => {}}
-              onPointerOver={() => {}}
-              onPointerOut={() => {}}
-            />
-          ) : null}
-          {editMode &&
-          drag.kind === "placing" &&
-          drag.itemType === "door" &&
-          ghostPos ? (
-            <PrimitiveDoorModel
-              item={{
-                _uid: "__door_ghost__",
-                type: "door",
-                x: worldToCanvas(ghostPos[0], ghostPos[2]).cx,
-                y: worldToCanvas(ghostPos[0], ghostPos[2]).cy,
-                w: DOOR_LENGTH,
-                h: DOOR_THICKNESS,
+            {/* Orbit / pan / zoom controls — disabled while follow cam is active or while editing furniture. */}
+            <OrbitControls
+              ref={orbitRef}
+              enabled={followAgentId === null && (!editMode || spaceDown)}
+              enableDamping
+              dampingFactor={0.08}
+              rotateSpeed={0.6}
+              zoomSpeed={0.8}
+              panSpeed={0.6}
+              minZoom={25}
+              maxZoom={120}
+              maxPolarAngle={Math.PI / 2.2}
+              enableRotate={!spaceDown}
+              mouseButtons={{
+                LEFT: spaceDown ? THREE.MOUSE.PAN : THREE.MOUSE.ROTATE,
+                MIDDLE: THREE.MOUSE.DOLLY,
+                RIGHT: THREE.MOUSE.PAN,
               }}
-              isSelected={false}
-              isHovered={false}
-              editMode={false}
-              onPointerDown={() => {}}
-              onPointerOver={() => {}}
-              onPointerOut={() => {}}
             />
-          ) : null}
 
-          {/* Floor raycaster for edit-mode interaction. */}
-          <SceneFloorRaycaster
-            enabled={editMode}
-            onMove={handleFloorMove}
-            onClick={handleFloorClick}
-          />
+            {/* Game loop — no React state, pure ref mutations. */}
+            <SceneGameLoop tick={tick} />
+
+            {/* New Idea 2: Camera preset animator. */}
+            <CameraPresetAnimator
+              presetRef={cameraPresetRef}
+              orbitRef={orbitRef}
+            />
+
+            {/* Follow cam: third-person perspective camera trailing the selected agent. */}
+            <FollowCamSystem
+              followRef={followAgentIdRef}
+              agentsRef={renderAgentsRef}
+              agentLookupRef={renderAgentLookupRef}
+            />
+
+            {/* E3 Idea 3: Spotlight effect on agent chip click. */}
+            <SceneSpotlightEffect
+              agentId={spotlightAgentId}
+              agentsRef={renderAgentsRef}
+              agentLookupRef={renderAgentLookupRef}
+            />
+
+            {/* Keep office lighting static to avoid extra scene churn from ambience effects. */}
+            <ambientLight intensity={0.72} color="#d8d4c8" />
+            <directionalLight
+              position={[8, 14, 6]}
+              intensity={1.1}
+              color="#f6f1e6"
+              castShadow
+              shadow-mapSize={[1024, 1024]}
+              shadow-bias={-0.0002}
+              shadow-normalBias={0.02}
+            />
+            <directionalLight
+              position={[-5, 8, -4]}
+              intensity={0.4}
+              color="#7090ff"
+            />
+
+            {/* Floor + walls — always visible, no async loading. */}
+            <SceneFloorAndWalls showRemoteOffice={remoteOfficeEnabled} />
+
+            {/* Wall pictures — procedural, no async loading. */}
+            <SceneWallPictures showRemoteOffice={remoteOfficeEnabled} />
+
+            {/* Environment lighting — async, wrapped in its own Suspense so floor stays visible. */}
+            <Suspense fallback={null}>
+              <Environment preset="city" />
+            </Suspense>
+
+            {/* Furniture models — each loads its GLB asynchronously. */}
+            <Suspense fallback={null}>
+              {!editMode ? (
+                <PrimitiveInstancedWallSegmentsModel items={wallItems} />
+              ) : null}
+              {!editMode ? (
+                <InstancedFurnitureItemsModel
+                  itemType="desk_cubicle"
+                  items={deskItems}
+                  onItemClick={handleDeskClick}
+                />
+              ) : null}
+              {!editMode ? (
+                <InstancedFurnitureItemsModel
+                  itemType="chair"
+                  items={chairItems}
+                />
+              ) : null}
+              {furniture.map((item) =>
+                item.type === "wall" ? (
+                  editMode ? (
+                    <PrimitiveWallSegmentModel
+                      key={item._uid}
+                      item={item}
+                      isSelected={item._uid === selectedUid}
+                      isHovered={item._uid === hoverUid}
+                      editMode={editMode}
+                      onPointerDown={handleFurniturePointerDown}
+                      onPointerOver={handleFurniturePointerOver}
+                      onPointerOut={handleFurniturePointerOut}
+                    />
+                  ) : null
+                ) : item.type === "desk_cubicle" ? (
+                  editMode ? (
+                    <GenericFurnitureModel
+                      key={item._uid}
+                      item={item}
+                      isSelected={item._uid === selectedUid}
+                      isHovered={item._uid === hoverUid}
+                      editMode={editMode}
+                      onPointerDown={handleFurniturePointerDown}
+                      onPointerOver={handleFurniturePointerOver}
+                      onPointerOut={handleFurniturePointerOut}
+                      onClick={handleDeskClick}
+                    />
+                  ) : null
+                ) : item.type === "chair" ? (
+                  editMode ? (
+                    <GenericFurnitureModel
+                      key={item._uid}
+                      item={item}
+                      isSelected={item._uid === selectedUid}
+                      isHovered={item._uid === hoverUid}
+                      editMode={editMode}
+                      onPointerDown={handleFurniturePointerDown}
+                      onPointerOver={handleFurniturePointerOver}
+                      onPointerOut={handleFurniturePointerOut}
+                      onClick={handleDeskClick}
+                    />
+                  ) : null
+                ) : item.type === "door" ? (
+                  <PrimitiveDoorModel
+                    key={item._uid}
+                    item={item}
+                    isSelected={item._uid === selectedUid}
+                    isHovered={item._uid === hoverUid}
+                    editMode={editMode}
+                    agentsRef={renderAgentsRef}
+                    onPointerDown={handleFurniturePointerDown}
+                    onPointerOver={handleFurniturePointerOver}
+                    onPointerOut={handleFurniturePointerOut}
+                  />
+                ) : item.type === "round_table" ? (
+                  <PrimitiveRoundTableModel
+                    key={item._uid}
+                    item={item}
+                    isSelected={item._uid === selectedUid}
+                    isHovered={item._uid === hoverUid}
+                    editMode={editMode}
+                    onPointerDown={handleFurniturePointerDown}
+                    onPointerOver={handleFurniturePointerOver}
+                    onPointerOut={handleFurniturePointerOut}
+                    onClick={handleDeskClick}
+                  />
+                ) : item.type === "keyboard" ? (
+                  <PrimitiveKeyboardModel
+                    key={item._uid}
+                    item={item}
+                    editMode={editMode}
+                    onPointerDown={handleFurniturePointerDown}
+                    onPointerOver={handleFurniturePointerOver}
+                    onPointerOut={handleFurniturePointerOut}
+                  />
+                ) : item.type === "mouse" ? (
+                  <PrimitiveMouseModel
+                    key={item._uid}
+                    item={item}
+                    editMode={editMode}
+                    onPointerDown={handleFurniturePointerDown}
+                    onPointerOver={handleFurniturePointerOver}
+                    onPointerOut={handleFurniturePointerOut}
+                  />
+                ) : item.type === "trash" ? (
+                  <PrimitiveTrashCanModel
+                    key={item._uid}
+                    item={item}
+                    editMode={editMode}
+                    onPointerDown={handleFurniturePointerDown}
+                    onPointerOver={handleFurniturePointerOver}
+                    onPointerOut={handleFurniturePointerOut}
+                  />
+                ) : item.type === "mug" ? (
+                  <PrimitiveMugModel
+                    key={item._uid}
+                    item={item}
+                    editMode={editMode}
+                    onPointerDown={handleFurniturePointerDown}
+                    onPointerOver={handleFurniturePointerOver}
+                    onPointerOut={handleFurniturePointerOut}
+                  />
+                ) : item.type === "clock" ? (
+                  <PrimitiveClockModel
+                    key={item._uid}
+                    item={item}
+                    editMode={editMode}
+                    onPointerDown={handleFurniturePointerDown}
+                    onPointerOver={handleFurniturePointerOver}
+                    onPointerOut={handleFurniturePointerOut}
+                  />
+                ) : item.type === "atm" ? (
+                  <InteractiveAtmMachineModel
+                    key={item._uid}
+                    item={item}
+                    isSelected={item._uid === selectedUid}
+                    isHovered={item._uid === hoverUid}
+                    editMode={editMode}
+                    onPointerDown={handleFurniturePointerDown}
+                    onPointerOver={handleFurniturePointerOver}
+                    onPointerOut={handleFurniturePointerOut}
+                    onClick={handleDeskClick}
+                  />
+                ) : item.type === "jukebox" ? (
+                  <InteractiveJukeboxModel
+                    key={item._uid}
+                    item={item}
+                    active={isJukeboxActive}
+                    enabled={soundclawEnabled}
+                    isSelected={item._uid === selectedUid}
+                    isHovered={item._uid === hoverUid}
+                    editMode={editMode}
+                    onPointerDown={handleFurniturePointerDown}
+                    onPointerOver={handleFurniturePointerOver}
+                    onPointerOut={handleFurniturePointerOut}
+                    onClick={editMode ? handleDeskClick : () => onJukeboxInteract?.()}
+                  />
+                ) : item.type === "sms_booth" ? (
+                  <InteractiveSmsBoothModel
+                    key={item._uid}
+                    item={item}
+                    isSelected={item._uid === selectedUid}
+                    isHovered={item._uid === hoverUid}
+                    editMode={editMode}
+                    doorOpen={smsBoothDoorOpen}
+                    onPointerDown={handleFurniturePointerDown}
+                    onPointerOver={handleFurniturePointerOver}
+                    onPointerOut={handleFurniturePointerOut}
+                    onClick={handleDeskClick}
+                  />
+                ) : item.type === "phone_booth" ? (
+                  <InteractivePhoneBoothModel
+                    key={item._uid}
+                    item={item}
+                    isSelected={item._uid === selectedUid}
+                    isHovered={item._uid === hoverUid}
+                    editMode={editMode}
+                    doorOpen={phoneBoothDoorOpen}
+                    onPointerDown={handleFurniturePointerDown}
+                    onPointerOver={handleFurniturePointerOver}
+                    onPointerOut={handleFurniturePointerOut}
+                    onClick={handleDeskClick}
+                  />
+                ) : item.type === "server_rack" ? (
+                  <InteractiveServerRackModel
+                    key={item._uid}
+                    item={item}
+                    isSelected={item._uid === selectedUid}
+                    isHovered={item._uid === hoverUid}
+                    editMode={editMode}
+                    onPointerDown={handleFurniturePointerDown}
+                    onPointerOver={handleFurniturePointerOver}
+                    onPointerOut={handleFurniturePointerOut}
+                    onClick={handleDeskClick}
+                  />
+                ) : item.type === "server_terminal" ? (
+                  <InteractiveServerTerminalModel
+                    key={item._uid}
+                    item={item}
+                    isSelected={item._uid === selectedUid}
+                    isHovered={item._uid === hoverUid}
+                    editMode={editMode}
+                    onPointerDown={handleFurniturePointerDown}
+                    onPointerOver={handleFurniturePointerOver}
+                    onPointerOut={handleFurniturePointerOut}
+                    onClick={handleDeskClick}
+                  />
+                ) : item.type === "vending" ? (
+                  <KitchenVendingMachineModel
+                    key={item._uid}
+                    item={item}
+                    editMode={editMode}
+                    onPointerDown={handleFurniturePointerDown}
+                    onPointerOver={handleFurniturePointerOver}
+                    onPointerOut={handleFurniturePointerOut}
+                  />
+                ) : item.type === "sink" ? (
+                  <KitchenSinkModel
+                    key={item._uid}
+                    item={item}
+                    editMode={editMode}
+                    onPointerDown={handleFurniturePointerDown}
+                    onPointerOver={handleFurniturePointerOver}
+                    onPointerOut={handleFurniturePointerOut}
+                  />
+                ) : item.type === "dishwasher" ? (
+                  <KitchenDishwasherModel
+                    key={item._uid}
+                    item={item}
+                    editMode={editMode}
+                    onPointerDown={handleFurniturePointerDown}
+                    onPointerOver={handleFurniturePointerOver}
+                    onPointerOut={handleFurniturePointerOut}
+                  />
+                ) : item.type === "pingpong" ? (
+                  <MachinePingPongTableModel
+                    key={item._uid}
+                    item={item}
+                    isSelected={item._uid === selectedUid}
+                    isHovered={item._uid === hoverUid}
+                    editMode={editMode}
+                    onPointerDown={handleFurniturePointerDown}
+                    onPointerOver={handleFurniturePointerOver}
+                    onPointerOut={handleFurniturePointerOut}
+                    onClick={handleDeskClick}
+                  />
+                ) : item.type === "qa_terminal" ? (
+                  <InteractiveQaTerminalModel
+                    key={item._uid}
+                    item={item}
+                    isSelected={item._uid === selectedUid}
+                    isHovered={item._uid === hoverUid}
+                    editMode={editMode}
+                    onPointerDown={handleFurniturePointerDown}
+                    onPointerOver={handleFurniturePointerOver}
+                    onPointerOut={handleFurniturePointerOut}
+                    onClick={handleDeskClick}
+                  />
+                ) : item.type === "device_rack" ? (
+                  <InteractiveDeviceRackModel
+                    key={item._uid}
+                    item={item}
+                    isSelected={item._uid === selectedUid}
+                    isHovered={item._uid === hoverUid}
+                    editMode={editMode}
+                    onPointerDown={handleFurniturePointerDown}
+                    onPointerOver={handleFurniturePointerOver}
+                    onPointerOut={handleFurniturePointerOut}
+                    onClick={handleDeskClick}
+                  />
+                ) : item.type === "test_bench" ? (
+                  <InteractiveTestBenchModel
+                    key={item._uid}
+                    item={item}
+                    isSelected={item._uid === selectedUid}
+                    isHovered={item._uid === hoverUid}
+                    editMode={editMode}
+                    onPointerDown={handleFurniturePointerDown}
+                    onPointerOver={handleFurniturePointerOver}
+                    onPointerOut={handleFurniturePointerOut}
+                    onClick={handleDeskClick}
+                  />
+                ) : item.type === "treadmill" ? (
+                  <InteractiveTreadmillModel
+                    key={item._uid}
+                    item={item}
+                    isSelected={item._uid === selectedUid}
+                    isHovered={item._uid === hoverUid}
+                    editMode={editMode}
+                    onPointerDown={handleFurniturePointerDown}
+                    onPointerOver={handleFurniturePointerOver}
+                    onPointerOut={handleFurniturePointerOut}
+                    onClick={handleDeskClick}
+                  />
+                ) : item.type === "weight_bench" ? (
+                  <InteractiveWeightBenchModel
+                    key={item._uid}
+                    item={item}
+                    isSelected={item._uid === selectedUid}
+                    isHovered={item._uid === hoverUid}
+                    editMode={editMode}
+                    onPointerDown={handleFurniturePointerDown}
+                    onPointerOver={handleFurniturePointerOver}
+                    onPointerOut={handleFurniturePointerOut}
+                    onClick={handleDeskClick}
+                  />
+                ) : item.type === "dumbbell_rack" ? (
+                  <InteractiveDumbbellRackModel
+                    key={item._uid}
+                    item={item}
+                    isSelected={item._uid === selectedUid}
+                    isHovered={item._uid === hoverUid}
+                    editMode={editMode}
+                    onPointerDown={handleFurniturePointerDown}
+                    onPointerOver={handleFurniturePointerOver}
+                    onPointerOut={handleFurniturePointerOut}
+                    onClick={handleDeskClick}
+                  />
+                ) : item.type === "exercise_bike" ? (
+                  <InteractiveExerciseBikeModel
+                    key={item._uid}
+                    item={item}
+                    isSelected={item._uid === selectedUid}
+                    isHovered={item._uid === hoverUid}
+                    editMode={editMode}
+                    onPointerDown={handleFurniturePointerDown}
+                    onPointerOver={handleFurniturePointerOver}
+                    onPointerOut={handleFurniturePointerOut}
+                    onClick={handleDeskClick}
+                  />
+                ) : item.type === "rowing_machine" ? (
+                  <InteractiveRowingMachineModel
+                    key={item._uid}
+                    item={item}
+                    isSelected={item._uid === selectedUid}
+                    isHovered={item._uid === hoverUid}
+                    editMode={editMode}
+                    onPointerDown={handleFurniturePointerDown}
+                    onPointerOver={handleFurniturePointerOver}
+                    onPointerOut={handleFurniturePointerOut}
+                    onClick={handleDeskClick}
+                  />
+                ) : item.type === "kettlebell_rack" ? (
+                  <InteractiveKettlebellRackModel
+                    key={item._uid}
+                    item={item}
+                    isSelected={item._uid === selectedUid}
+                    isHovered={item._uid === hoverUid}
+                    editMode={editMode}
+                    onPointerDown={handleFurniturePointerDown}
+                    onPointerOver={handleFurniturePointerOver}
+                    onPointerOut={handleFurniturePointerOut}
+                    onClick={handleDeskClick}
+                  />
+                ) : item.type === "punching_bag" ? (
+                  <InteractivePunchingBagModel
+                    key={item._uid}
+                    item={item}
+                    isSelected={item._uid === selectedUid}
+                    isHovered={item._uid === hoverUid}
+                    editMode={editMode}
+                    onPointerDown={handleFurniturePointerDown}
+                    onPointerOver={handleFurniturePointerOver}
+                    onPointerOut={handleFurniturePointerOut}
+                    onClick={handleDeskClick}
+                  />
+                ) : item.type === "yoga_mat" ? (
+                  <InteractiveYogaMatModel
+                    key={item._uid}
+                    item={item}
+                    isSelected={item._uid === selectedUid}
+                    isHovered={item._uid === hoverUid}
+                    editMode={editMode}
+                    onPointerDown={handleFurniturePointerDown}
+                    onPointerOver={handleFurniturePointerOver}
+                    onPointerOut={handleFurniturePointerOut}
+                    onClick={handleDeskClick}
+                  />
+                ) : item.type === "stove" ? (
+                  <KitchenStoveModel
+                    key={item._uid}
+                    item={item}
+                    editMode={editMode}
+                    onPointerDown={handleFurniturePointerDown}
+                    onPointerOver={handleFurniturePointerOver}
+                    onPointerOut={handleFurniturePointerOut}
+                  />
+                ) : item.type === "microwave" ? (
+                  <KitchenMicrowaveModel
+                    key={item._uid}
+                    item={item}
+                    editMode={editMode}
+                    onPointerDown={handleFurniturePointerDown}
+                    onPointerOver={handleFurniturePointerOver}
+                    onPointerOut={handleFurniturePointerOut}
+                  />
+                ) : item.type === "wall_cabinet" ? (
+                  <KitchenWallCabinetModel
+                    key={item._uid}
+                    item={item}
+                    editMode={editMode}
+                    onPointerDown={handleFurniturePointerDown}
+                    onPointerOver={handleFurniturePointerOver}
+                    onPointerOut={handleFurniturePointerOut}
+                  />
+                ) : (
+                  <GenericFurnitureModel
+                    key={item._uid}
+                    item={item}
+                    isSelected={item._uid === selectedUid}
+                    isHovered={item._uid === hoverUid}
+                    editMode={editMode}
+                    onPointerDown={handleFurniturePointerDown}
+                    onPointerOver={handleFurniturePointerOver}
+                    onPointerOut={handleFurniturePointerOut}
+                    onClick={handleDeskClick}
+                  />
+                ),
+              )}
+            </Suspense>
+
+            {remoteLayoutFurniture.length > 0 ? (
+              <ReadOnlyFurnitureClone furniture={remoteLayoutFurniture} />
+            ) : null}
+
+          {/* Removed standalone Jukebox as it's now in the furniture loop */}
+
+            {/* Agents — purely imperative, driven by renderAgentsRef inside useFrame. */}
+            {sceneAgents.map((agent) => {
+              const isJanitor = "role" in agent && agent.role === "janitor";
+              return (
+                <AgentObjectModel
+                  key={agent.id}
+                  agentId={agent.id}
+                  name={agent.name}
+                  status={agent.status}
+                  color={agentColorMap.get(agent.id) ?? "#888"}
+                  appearance={
+                    "avatarProfile" in agent
+                      ? (agent.avatarProfile ?? null)
+                      : null
+                  }
+                  agentsRef={renderAgentsRef}
+                  agentLookupRef={renderAgentLookupRef}
+                  onHover={isJanitor ? undefined : handleAgentHover}
+                  onUnhover={isJanitor ? undefined : handleAgentUnhover}
+                  onClick={isJanitor ? undefined : handleAgentClick}
+                  onContextMenu={isJanitor ? undefined : handleAgentContextMenu}
+                  showSpeech={
+                    isJanitor
+                      ? false
+                      : standupMeeting?.phase === "in_progress"
+                        ? Boolean(standupSpeechTextByAgentId[agent.id])
+                        : speechAgentIds.has(agent.id)
+                  }
+                  speechText={
+                    isJanitor
+                      ? null
+                      : standupMeeting?.phase === "in_progress"
+                        ? (standupSpeechTextByAgentId[agent.id] ?? null)
+                        : (speechTextByAgentId[agent.id] ?? null)
+                  }
+                  suppressSpeechBubble={
+                    suppressSceneSpeechBubbles &&
+                    standupMeeting?.currentSpeakerAgentId !== agent.id
+                  }
+                />
+              );
+            })}
+
+            <ScenePingPongBall agentsRef={renderAgentsRef} />
+
+            {/* Idea 7: Desk nameplates — small labels showing assigned agent above each desk. */}
+            <DeskNameplateOverlay
+              deskLocations={deskLocations}
+              agents={agents}
+              deskByAgentRef={deskByAgentRef}
+            />
+
+            {/* New Idea 5: Agent color trails while walking. */}
+            {trailMode ? (
+              <AgentTrailSystem
+                agentsRef={renderAgentsRef}
+                colorMap={agentColorMap}
+              />
+            ) : null}
+
+            {/* New Idea 7: Heatmap overlay when heatmap mode is active. */}
+            {heatmapMode ? (
+              <AgentHeatmapSystem
+                agentsRef={renderAgentsRef}
+                heatmapMode={heatmapMode}
+                heatGridRef={heatGridRef}
+              />
+            ) : null}
+
+            {/* Placement ghost. */}
+            {editMode &&
+              drag.kind === "placing" &&
+              drag.itemType !== "wall" &&
+              ghostPos && (
+                <Suspense fallback={null}>
+                  <FurniturePlacementGhost
+                    itemType={drag.itemType}
+                    position={ghostPos}
+                  />
+                </Suspense>
+              )}
+            {editMode &&
+            drag.kind === "placing" &&
+            drag.itemType === "wall" &&
+            wallGhostItem ? (
+              <PrimitiveWallSegmentModel
+                item={wallGhostItem}
+                isSelected={false}
+                isHovered={false}
+                editMode={false}
+                onPointerDown={() => {}}
+                onPointerOver={() => {}}
+                onPointerOut={() => {}}
+              />
+            ) : null}
+            {editMode &&
+            drag.kind === "placing" &&
+            drag.itemType === "door" &&
+            ghostPos ? (
+              <PrimitiveDoorModel
+                item={{
+                  _uid: "__door_ghost__",
+                  type: "door",
+                  x: worldToCanvas(ghostPos[0], ghostPos[2]).cx,
+                  y: worldToCanvas(ghostPos[0], ghostPos[2]).cy,
+                  w: DOOR_LENGTH,
+                  h: DOOR_THICKNESS,
+                }}
+                isSelected={false}
+                isHovered={false}
+                editMode={false}
+                onPointerDown={() => {}}
+                onPointerOver={() => {}}
+                onPointerOut={() => {}}
+              />
+            ) : null}
+
+            {/* Floor raycaster for edit-mode interaction. */}
+            <SceneFloorRaycaster
+              enabled={editMode}
+              onMove={handleFloorMove}
+              onClick={handleFloorClick}
+            />
           </Canvas>
         ) : null}
       </div>
@@ -5511,7 +5659,11 @@ export function RetroOffice3D({
                   icon: <Monitor size={12} />,
                   title: "Front desk",
                 },
-                { key: "lounge", icon: <Armchair size={12} />, title: "Lounge" },
+                {
+                  key: "lounge",
+                  icon: <Armchair size={12} />,
+                  title: "Lounge",
+                },
               ] as const
             ).map(({ key, icon, title }) => (
               <button
@@ -5603,7 +5755,9 @@ export function RetroOffice3D({
                       <span
                         key={mood.ts}
                         className="absolute -top-6 left-1/2 -translate-x-1/2 text-sm pointer-events-none"
-                        style={{ animation: "mood-float 2.5s ease-out forwards" }}
+                        style={{
+                          animation: "mood-float 2.5s ease-out forwards",
+                        }}
                       >
                         {mood.emoji}
                       </span>
@@ -5709,10 +5863,14 @@ export function RetroOffice3D({
                       <button
                         type="button"
                         title={
-                          followAgentId === agent.id ? "Exit follow cam" : "Follow cam"
+                          followAgentId === agent.id
+                            ? "Exit follow cam"
+                            : "Follow cam"
                         }
                         onClick={() =>
-                          setFollowAgentId((prev) => (prev === agent.id ? null : agent.id))
+                          setFollowAgentId((prev) =>
+                            prev === agent.id ? null : agent.id,
+                          )
                         }
                         className={`flex h-8 w-8 items-center justify-center rounded-lg border transition-colors ${
                           followAgentId === agent.id
@@ -5728,21 +5886,23 @@ export function RetroOffice3D({
                           isRemoteAgent
                             ? "Remote office is view only"
                             : monitorAgentId === agent.id
-                            ? "Close desk monitor"
-                            : "Open desk monitor"
+                              ? "Close desk monitor"
+                              : "Open desk monitor"
                         }
                         disabled={isRemoteAgent}
                         onClick={() => {
                           if (!isRemoteAgent) {
-                            onMonitorSelect?.(monitorAgentId === agent.id ? null : agent.id);
+                            onMonitorSelect?.(
+                              monitorAgentId === agent.id ? null : agent.id,
+                            );
                           }
                         }}
                         className={`flex h-8 w-8 items-center justify-center rounded-lg border transition-colors ${
                           isRemoteAgent
                             ? "cursor-not-allowed border-white/10 text-white/25"
                             : monitorAgentId === agent.id
-                            ? "border-emerald-300/30 bg-emerald-300/10 text-emerald-200"
-                            : "border-amber-900/20 text-white/60 hover:border-emerald-400/30 hover:text-emerald-200"
+                              ? "border-emerald-300/30 bg-emerald-300/10 text-emerald-200"
+                              : "border-amber-900/20 text-white/60 hover:border-emerald-400/30 hover:text-emerald-200"
                         }`}
                       >
                         <Monitor size={12} />
@@ -5773,8 +5933,10 @@ export function RetroOffice3D({
       {!immersiveOverlayActive &&
         hoveredAgent &&
         (() => {
-          const isError = hoveredAgentStatus?.isError ?? hoveredAgent.status === "error";
-          const working = hoveredAgentStatus?.working ?? hoveredAgent.status === "working";
+          const isError =
+            hoveredAgentStatus?.isError ?? hoveredAgent.status === "error";
+          const working =
+            hoveredAgentStatus?.working ?? hoveredAgent.status === "working";
           return (
             <div className="absolute top-24 left-1/2 -translate-x-1/2 z-30 pointer-events-none select-none">
               <div className="flex items-center gap-3 bg-[#120e08]/95 backdrop-blur-sm border border-amber-800/30 rounded-lg px-4 py-2.5 shadow-xl">
@@ -6219,7 +6381,9 @@ export function RetroOffice3D({
         </div>
       ) : null}
 
-      {smsBoothImmersive && effectiveTextMessageScenario && effectiveSmsBoothAgentId ? (
+      {smsBoothImmersive &&
+      effectiveTextMessageScenario &&
+      effectiveSmsBoothAgentId ? (
         <div className="pointer-events-none absolute inset-0 z-20 overflow-hidden">
           <div className="absolute inset-0 bg-black/45" />
           <div className="absolute inset-x-0 top-0 h-[8vh] bg-[linear-gradient(180deg,rgba(0,0,0,0.94),rgba(0,0,0,0.62))]" />
@@ -6259,7 +6423,9 @@ export function RetroOffice3D({
         </div>
       ) : null}
 
-      {phoneBoothImmersive && effectivePhoneCallScenario && effectivePhoneBoothAgentId ? (
+      {phoneBoothImmersive &&
+      effectivePhoneCallScenario &&
+      effectivePhoneBoothAgentId ? (
         <div className="pointer-events-none absolute inset-0 z-20 overflow-hidden">
           <div className="absolute inset-0 bg-black/45" />
           <div className="absolute inset-x-0 top-0 h-[8vh] bg-[linear-gradient(180deg,rgba(0,0,0,0.94),rgba(0,0,0,0.62))]" />

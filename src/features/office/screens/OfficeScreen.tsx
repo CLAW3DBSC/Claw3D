@@ -26,7 +26,10 @@ import {
   createStudioSettingsCoordinator,
   type StudioSettingsLoadOptions,
 } from "@/lib/studio/coordinator";
-import { resolveDeskAssignments } from "@/lib/studio/settings";
+import {
+  resolveDeskAssignments,
+  resolveOfficePreferencePublic,
+} from "@/lib/studio/settings";
 import {
   createGatewayAgent,
   renameGatewayAgent,
@@ -69,7 +72,11 @@ import {
   applyCreateAgentBootstrapPermissions,
   CREATE_AGENT_DEFAULT_PERMISSIONS,
 } from "@/features/agents/operations/createAgentBootstrapOperation";
-import { deleteAgentRecordViaStudio } from "@/features/agents/operations/deleteAgentOperation";
+import {
+  deleteAgentRecordViaStudio,
+  deleteAgentViaStudio,
+  trashAgentStateViaStudio,
+} from "@/features/agents/operations/deleteAgentOperation";
 import { planAgentSettingsMutation } from "@/features/agents/operations/agentSettingsMutationWorkflow";
 import {
   executeHistorySyncCommands,
@@ -95,7 +102,10 @@ import {
   type GatewayModelChoice,
 } from "@/lib/gateway/models";
 import type { GatewayModelPolicySnapshot } from "@/lib/gateway/models";
-import type { AgentAvatarProfile } from "@/lib/avatars/profile";
+import {
+  createDefaultAgentAvatarProfile,
+  type AgentAvatarProfile,
+} from "@/lib/avatars/profile";
 import {
   createEmptyPersonalityDraft,
   serializePersonalityFiles,
@@ -107,11 +117,35 @@ import {
   HQSidebar,
   type HQSidebarTab,
 } from "@/features/office/components/HQSidebar";
+import { CompanyBuilderModal } from "@/features/company-builder/components/CompanyBuilderModal";
+import {
+  buildGenerateCompanyPlanPrompt,
+  buildImproveCompanyBriefPrompt,
+  buildStoredCompanySnapshot,
+  parseCompanyPlanFromAssistantText,
+} from "@/features/company-builder/planning";
+import {
+  buildCompanyRolePermissionsDraft,
+  resolveCompanyPlanningAgent,
+  runOpenClawPlanningPrompt,
+} from "@/features/company-builder/operations/companyBuilderGateway";
+import { runCompanyBootstrapOperation } from "@/features/company-builder/operations/companyBootstrapOperation";
+import type {
+  CompanyBuilderInput,
+  CompanyBuilderPlan,
+} from "@/features/company-builder/types";
 import { AnalyticsPanel } from "@/features/office/components/panels/AnalyticsPanel";
 import { HistoryPanel } from "@/features/office/components/panels/HistoryPanel";
 import { InboxPanel } from "@/features/office/components/panels/InboxPanel";
 import { PlaybooksPanel } from "@/features/office/components/panels/PlaybooksPanel";
 import { SkillsMarketplaceModal } from "@/features/office/components/panels/SkillsMarketplaceModal";
+import { JukeboxPanel } from "@/features/spotify-jukebox/components/JukeboxPanel";
+import { JukeboxDisabledPanel } from "@/features/spotify-jukebox/components/JukeboxDisabledPanel";
+import { executeBrowserJukeboxCommand } from "@/features/spotify-jukebox/agentBridge";
+import {
+  SOUNDCLAW_PLAYBACK_STARTED_EVENT_NAME,
+  useJukeboxStore,
+} from "@/features/spotify-jukebox/store";
 import { useOfficeSkillTriggers } from "@/features/office/hooks/useOfficeSkillTriggers";
 import { useRemoteOfficePresence } from "@/features/office/hooks/useRemoteOfficePresence";
 import { useRemoteOfficeLayout } from "@/features/office/hooks/useRemoteOfficeLayout";
@@ -147,6 +181,7 @@ import {
   buildOfficeDeskMonitor,
   type OfficeDeskMonitor,
 } from "@/lib/office/deskMonitor";
+import { deriveSkillReadinessState } from "@/lib/skills/presentation";
 import type { StandupAgentSnapshot } from "@/lib/office/standup/types";
 import type { SkillStatusEntry } from "@/lib/skills/types";
 
@@ -175,6 +210,31 @@ const GYM_WORKOUT_LATCH_MS = 60_000;
 const MAIN_AGENT_ID = "main";
 const MAX_OPENCLAW_LOG_ENTRIES = 200;
 const MAX_OPENCLAW_AGENT_OUTPUT_LINES = 12;
+const OFFICE_DANCE_MS = 60_000;
+
+const getLatestUserRequestForAgent = (
+  agent: AgentState,
+): { text: string; requestKey: string } | null => {
+  const transcriptEntries = Array.isArray(agent.transcriptEntries)
+    ? agent.transcriptEntries
+    : [];
+  for (let index = transcriptEntries.length - 1; index >= 0; index -= 1) {
+    const entry = transcriptEntries[index];
+    if (!entry || entry.role !== "user") continue;
+    const text = entry.text.trim();
+    if (!text) continue;
+    return {
+      text,
+      requestKey: `${agent.sessionKey}:${entry.sequenceKey}:${text}`,
+    };
+  }
+  const fallback = agent.lastUserMessage?.trim() ?? "";
+  if (!fallback) return null;
+  return {
+    text: fallback,
+    requestKey: `${agent.sessionKey}:fallback:${fallback}`,
+  };
+};
 
 type OpenClawLogEntry = {
   id: string;
@@ -869,6 +929,19 @@ export function OfficeScreen({
   const [createAgentModalError, setCreateAgentModalError] = useState<string | null>(
     null,
   );
+  const [companyBuilderOpen, setCompanyBuilderOpen] = useState(false);
+  const [companyBuilderNonce, setCompanyBuilderNonce] = useState(0);
+  const [companyBuilderBusy, setCompanyBuilderBusy] = useState(false);
+  const [companyBuilderError, setCompanyBuilderError] = useState<string | null>(null);
+  const [companyBuilderStatusLine, setCompanyBuilderStatusLine] = useState<string | null>(null);
+  const [companyBuilderInput, setCompanyBuilderInput] = useState<CompanyBuilderInput>({
+    businessDescription: "",
+    improvedBrief: "",
+  });
+  const [lastCompanyPlan, setLastCompanyPlan] = useState<CompanyBuilderPlan | null>(null);
+  const [companyCreatedSignal, setCompanyCreatedSignal] = useState(0);
+  const [createdCompanyName, setCreatedCompanyName] = useState<string | null>(null);
+  const [officeCameraCenterSignal, setOfficeCameraCenterSignal] = useState(0);
   const [createAgentBlock, setCreateAgentBlock] =
     useState<CreateAgentBlockState | null>(null);
   const [deleteAgentBlock, setDeleteAgentBlock] =
@@ -890,12 +963,67 @@ export function OfficeScreen({
   const [gatewayModels, setGatewayModels] = useState<GatewayModelChoice[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [marketplaceOpen, setMarketplaceOpen] = useState(false);
+  const [danceUntilByAgentId, setDanceUntilByAgentId] = useState<Record<string, number>>({});
+  const initJukeboxStore = useJukeboxStore((state) => state.init);
+  const jukeboxToken = useJukeboxStore((state) => state.token);
+  // Auto-open jukebox panel for legacy direct-auth callbacks.
+  const [jukeboxOpen, setJukeboxOpen] = useState(() => {
+    if (typeof window === "undefined") return false;
+    const searchParams = new URL(window.location.href).searchParams;
+    return searchParams.has("code");
+  });
   const [activeSidebarTab, setActiveSidebarTab] =
     useState<HQSidebarTab>("inbox");
+  const pendingJukeboxCommandTimeoutsRef = useRef<
+    Map<string, { requestKey: string; timeoutId: number }>
+  >(new Map());
+  const handledJukeboxRequestKeyByAgentIdRef = useRef<Record<string, string>>({});
   const router = useRouter();
   const { showOnboarding, completeOnboarding, resetOnboarding } =
     useOnboardingState();
   const [forceShowOnboarding, setForceShowOnboarding] = useState(false);
+  useEffect(() => {
+    initJukeboxStore();
+  }, [initJukeboxStore]);
+  useEffect(() => {
+    const handlePlaybackStarted = () => {
+      const now = Date.now();
+      const until = now + OFFICE_DANCE_MS;
+      setDanceUntilByAgentId((previous) => {
+        const next: Record<string, number> = {};
+        for (const agent of state.agents) {
+          next[agent.agentId] = until;
+        }
+        return { ...previous, ...next };
+      });
+    };
+    window.addEventListener(
+      SOUNDCLAW_PLAYBACK_STARTED_EVENT_NAME,
+      handlePlaybackStarted,
+    );
+    return () => {
+      window.removeEventListener(
+        SOUNDCLAW_PLAYBACK_STARTED_EVENT_NAME,
+        handlePlaybackStarted,
+      );
+    };
+  }, [state.agents]);
+  useEffect(() => {
+    const now = Date.now();
+    setDanceUntilByAgentId((previous) =>
+      Object.fromEntries(
+        Object.entries(previous).filter(([, until]) => until > now),
+      ),
+    );
+  }, [state.agents]);
+  useEffect(() => {
+    return () => {
+      for (const pendingEntry of pendingJukeboxCommandTimeoutsRef.current.values()) {
+        window.clearTimeout(pendingEntry.timeoutId);
+      }
+      pendingJukeboxCommandTimeoutsRef.current.clear();
+    };
+  }, []);
   const {
     loaded: officeTitleLoaded,
     title: officeTitle,
@@ -956,11 +1084,16 @@ export function OfficeScreen({
   const showOnboardingWizard = showOnboarding || forceShowOnboarding;
   const handleOpenOnboarding = useCallback(() => {
     resetOnboarding();
+    setCompanyCreatedSignal(0);
+    setCreatedCompanyName(null);
     setForceShowOnboarding(true);
   }, [resetOnboarding]);
   const handleCompleteOnboarding = useCallback(() => {
     completeOnboarding();
+    setCompanyCreatedSignal(0);
+    setCreatedCompanyName(null);
     setForceShowOnboarding(false);
+    setOfficeCameraCenterSignal((current) => current + 1);
   }, [completeOnboarding]);
 
   const handleAvatarProfileSave = useCallback(
@@ -1117,6 +1250,49 @@ export function OfficeScreen({
       } catch {
         if (cancelled) return;
         setDeskAssignmentByDeskUid({});
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [gatewayUrl, loadStudioSettings]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const gatewayKey = gatewayUrl.trim();
+    if (!gatewayKey) {
+      setCompanyBuilderInput({
+        businessDescription: "",
+        improvedBrief: "",
+      });
+      setLastCompanyPlan(null);
+      return;
+    }
+    void (async () => {
+      try {
+        const settings = await loadStudioSettings({ maxAgeMs: 30_000 });
+        if (!settings || cancelled) return;
+        const officePreference = resolveOfficePreferencePublic(settings, gatewayKey);
+        setCompanyBuilderInput({
+          businessDescription: officePreference.companyPrompt,
+          improvedBrief: officePreference.companyImprovedBrief,
+        });
+        if (officePreference.companyPlanJson.trim()) {
+          try {
+            setLastCompanyPlan(
+              JSON.parse(officePreference.companyPlanJson) as CompanyBuilderPlan,
+            );
+          } catch (error) {
+            console.error("Failed to parse saved company plan.", error);
+            setLastCompanyPlan(null);
+          }
+        } else {
+          setLastCompanyPlan(null);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.error("Failed to load company builder preference.", error);
+        }
       }
     })();
     return () => {
@@ -1296,6 +1472,163 @@ export function OfficeScreen({
     setCreateAgentWizardNonce((current) => current + 1);
     setCreateAgentWizardOpen(true);
   }, []);
+  const plannerAgent = useMemo(
+    () =>
+      resolveCompanyPlanningAgent({
+        agents: state.agents,
+        preferredAgentId: selectedChatAgentId ?? state.selectedAgentId,
+      }),
+    [selectedChatAgentId, state.agents, state.selectedAgentId],
+  );
+  const persistCompanyBuilderSnapshot = useCallback(
+    (input: CompanyBuilderInput, plan: CompanyBuilderPlan) => {
+      const gatewayKey = gatewayUrl.trim();
+      if (!gatewayKey) return;
+      const snapshot = buildStoredCompanySnapshot({
+        prompt: input.businessDescription,
+        improvedBrief: input.improvedBrief,
+        plan,
+      });
+      settingsCoordinator.schedulePatch(
+        {
+          office: {
+            [gatewayKey]: {
+              companyName: snapshot.companyName,
+              companyPrompt: snapshot.prompt,
+              companyImprovedBrief: snapshot.improvedBrief,
+              companySummary: snapshot.summary,
+              companyGeneratedAt: snapshot.generatedAt,
+              companyRoleTitles: snapshot.roleTitles,
+              companyPlanJson: snapshot.planJson,
+            },
+          },
+        },
+        0,
+      );
+      setCompanyBuilderInput(input);
+      setLastCompanyPlan(plan);
+    },
+    [gatewayUrl, settingsCoordinator],
+  );
+  const handleOpenCompanyBuilder = useCallback(() => {
+    setCompanyBuilderError(null);
+    setCompanyBuilderStatusLine(null);
+    setCreatedCompanyName(null);
+    setCompanyBuilderNonce((current) => current + 1);
+    setCompanyBuilderOpen(true);
+  }, []);
+  const handleCloseCompanyBuilder = useCallback(() => {
+    if (companyBuilderBusy) return;
+    setCompanyBuilderOpen(false);
+    setCompanyBuilderError(null);
+    setCompanyBuilderStatusLine(null);
+  }, [companyBuilderBusy]);
+  const handleClearCompanyBuilder = useCallback(() => {
+    const gatewayKey = gatewayUrl.trim();
+    setCompanyBuilderInput({
+      businessDescription: "",
+      improvedBrief: "",
+    });
+    setLastCompanyPlan(null);
+    setCompanyBuilderError(null);
+    setCompanyBuilderStatusLine(null);
+    if (!gatewayKey) return;
+    settingsCoordinator.schedulePatch(
+      {
+        office: {
+          [gatewayKey]: {
+            companyName: "",
+            companyPrompt: "",
+            companyImprovedBrief: "",
+            companySummary: "",
+            companyGeneratedAt: "",
+            companyRoleTitles: [],
+            companyPlanJson: "",
+          },
+        },
+      },
+      0,
+    );
+  }, [gatewayUrl, settingsCoordinator]);
+  const runCompanyBuilderAiTask = useCallback(
+    async (prompt: string, statusText: string) => {
+      if (status !== "connected") {
+        throw new Error("Connect to OpenClaw before using the company builder.");
+      }
+      const livePlannerAgent = resolveCompanyPlanningAgent({
+        agents: stateRef.current.agents,
+        preferredAgentId: selectedChatAgentId ?? state.selectedAgentId,
+      });
+      if (!livePlannerAgent) {
+        throw new Error("Create or load at least one agent before using AI suggestions.");
+      }
+      setCompanyBuilderStatusLine(statusText);
+      return runOpenClawPlanningPrompt({
+        client,
+        dispatch,
+        agent: livePlannerAgent,
+        getAgent: (agentId) =>
+          stateRef.current.agents.find((entry) => entry.agentId === agentId) ?? null,
+        prompt,
+      });
+    },
+    [client, dispatch, selectedChatAgentId, state.selectedAgentId, status],
+  );
+  const handleImproveCompanyBrief = useCallback(
+    async (brief: string) => {
+      setCompanyBuilderBusy(true);
+      setCompanyBuilderError(null);
+      try {
+        const improvedBrief = await runCompanyBuilderAiTask(
+          buildImproveCompanyBriefPrompt(brief),
+          "Improving your company brief with OpenClaw.",
+        );
+        setCompanyBuilderInput((current) => ({
+          ...current,
+          businessDescription: brief,
+          improvedBrief,
+        }));
+        return improvedBrief;
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Failed to improve the company brief.";
+        setCompanyBuilderError(message);
+        throw error;
+      } finally {
+        setCompanyBuilderBusy(false);
+        setCompanyBuilderStatusLine(null);
+      }
+    },
+    [runCompanyBuilderAiTask],
+  );
+  const handleGenerateCompanyPlan = useCallback(
+    async (brief: string) => {
+      setCompanyBuilderBusy(true);
+      setCompanyBuilderError(null);
+      try {
+        const response = await runCompanyBuilderAiTask(
+          buildGenerateCompanyPlanPrompt(brief),
+          "Generating your AI company structure with OpenClaw.",
+        );
+        const parsedPlan = parseCompanyPlanFromAssistantText(response);
+        const nextInput: CompanyBuilderInput = {
+          businessDescription: companyBuilderInput.businessDescription,
+          improvedBrief: brief === companyBuilderInput.businessDescription ? "" : brief,
+        };
+        persistCompanyBuilderSnapshot(nextInput, parsedPlan);
+        return parsedPlan;
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Failed to generate the company plan.";
+        setCompanyBuilderError(message);
+        throw error;
+      } finally {
+        setCompanyBuilderBusy(false);
+        setCompanyBuilderStatusLine(null);
+      }
+    },
+    [companyBuilderInput.businessDescription, persistCompanyBuilderSnapshot, runCompanyBuilderAiTask],
+  );
   const clearDeletedAgentUiState = useCallback((agentId: string) => {
     setSelectedChatAgentId((current) => (current === agentId ? null : current));
     setAgentEditorAgentId((current) => (current === agentId ? null : current));
@@ -1315,6 +1648,141 @@ export function OfficeScreen({
       return next;
     });
   }, []);
+  const handleCreateCompanyFromPlan = useCallback(
+    async (params: { input: CompanyBuilderInput; plan: CompanyBuilderPlan }) => {
+      if (status !== "connected") {
+        const message = "Connect to OpenClaw before creating the company.";
+        setCompanyBuilderError(message);
+        throw new Error(message);
+      }
+      const existingAgentIds = stateRef.current.agents.map((entry) => entry.agentId);
+      const shouldSkipWorkspaceCleanupError = (error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        return (
+          message.includes("Permission denied") ||
+          message.includes("OPENCLAW_GATEWAY_SSH_TARGET") ||
+          message.includes("Invalid gateway URL") ||
+          message.includes("Gateway URL is missing")
+        );
+      };
+      const logDeleteError = (message: string, error: unknown) => {
+        if (
+          message.startsWith("Failed to move agent workspace/state into trash.") &&
+          shouldSkipWorkspaceCleanupError(error)
+        ) {
+          return;
+        }
+        console.error(message, error);
+      };
+      setCompanyBuilderBusy(true);
+      setCompanyBuilderError(null);
+      try {
+        await runCompanyBootstrapOperation({
+          input: params.input,
+          plan: params.plan,
+          existingAgentIds,
+          deleteExistingAgent: async (agentId) => {
+            try {
+              await deleteAgentViaStudio({
+                client,
+                agentId,
+                logError: logDeleteError,
+              });
+            } catch (error) {
+              if (!shouldSkipWorkspaceCleanupError(error)) {
+                throw error;
+              }
+              await deleteAgentRecordViaStudio({
+                client,
+                agentId,
+                logError: logDeleteError,
+              });
+            }
+          },
+          clearReusedAgentState: async (agentId) => {
+            try {
+              await trashAgentStateViaStudio({ agentId });
+            } catch (error) {
+              if (!shouldSkipWorkspaceCleanupError(error)) {
+                throw error;
+              }
+            }
+          },
+          renameAgent: async (agentId, name) => {
+            await renameGatewayAgent({ client, agentId, name });
+            dispatch({ type: "updateAgent", agentId, patch: { name } });
+          },
+          onExistingAgentDeleted: (agentId) => {
+            clearDeletedAgentUiState(agentId);
+            dispatch({ type: "removeAgent", agentId });
+          },
+          createAgent: async (name) => createGatewayAgent({ client, name }),
+          writeAgentFiles: async (agentId, files) => {
+            await writeGatewayAgentFiles({
+              client,
+              agentId,
+              files,
+            });
+          },
+          saveAvatar: (agentId) => {
+            handleAvatarProfileSave(
+              agentId,
+              createDefaultAgentAvatarProfile(randomUUID()),
+            );
+          },
+          loadAgents: () => loadAgents({ forceSettings: true }),
+          findAgentById: (agentId) => {
+            const liveAgent =
+              stateRef.current.agents.find((entry) => entry.agentId === agentId) ?? null;
+            if (!liveAgent?.sessionKey) return null;
+            return {
+              agentId: liveAgent.agentId,
+              sessionKey: liveAgent.sessionKey,
+            };
+          },
+          resetAgentSession: async (_agentId, sessionKey) => {
+            await client.call("sessions.reset", { key: sessionKey });
+          },
+          applyPermissions: async (agentId, sessionKey, commandMode) => {
+            await applyCreateAgentBootstrapPermissions({
+              client,
+              agentId,
+              sessionKey,
+              draft: buildCompanyRolePermissionsDraft(commandMode),
+              loadAgents: () => loadAgents({ forceSettings: true }),
+            });
+          },
+          persistSnapshot: persistCompanyBuilderSnapshot,
+          setOfficeTitle,
+          selectAgent: (agentId) => {
+            dispatch({ type: "selectAgent", agentId });
+            setSelectedChatAgentId(agentId);
+          },
+          setStatusLine: setCompanyBuilderStatusLine,
+        });
+        setCreatedCompanyName(params.plan.companyName);
+        setCompanyCreatedSignal((current) => current + 1);
+        setCompanyBuilderOpen(false);
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Failed to create the company.";
+        setCompanyBuilderError(message);
+        throw error;
+      } finally {
+        setCompanyBuilderBusy(false);
+      }
+    },
+    [
+      clearDeletedAgentUiState,
+      client,
+      dispatch,
+      handleAvatarProfileSave,
+      loadAgents,
+      persistCompanyBuilderSnapshot,
+      setOfficeTitle,
+      status,
+    ],
+  );
   const createAgentStatusLine = useMemo(() => {
     if (!createAgentBlock) return null;
     if (createAgentBlock.phase === "queued") {
@@ -2245,6 +2713,7 @@ export function OfficeScreen({
 
     return {
       ...base,
+      danceUntilByAgentId: danceUntilByAgentId,
       deskHoldByAgentId: {
         ...base.deskHoldByAgentId,
         ...skillTriggerHoldMaps.deskHoldByAgentId,
@@ -2257,6 +2726,10 @@ export function OfficeScreen({
         ...base.gymHoldByAgentId,
         ...skillTriggerHoldMaps.gymHoldByAgentId,
       },
+      jukeboxHoldByAgentId: {
+        ...base.jukeboxHoldByAgentId,
+        ...skillTriggerHoldMaps.jukeboxHoldByAgentId,
+      },
       qaHoldByAgentId: {
         ...base.qaHoldByAgentId,
         ...skillTriggerHoldMaps.qaHoldByAgentId,
@@ -2268,6 +2741,7 @@ export function OfficeScreen({
     };
   }, [
     animationNowMs,
+    danceUntilByAgentId,
     marketplaceGymHoldByAgentId,
     officeTriggerState,
     skillTriggers.movementTargetByAgentId,
@@ -2276,6 +2750,7 @@ export function OfficeScreen({
   const {
     deskHoldByAgentId,
     githubHoldByAgentId,
+    jukeboxHoldByAgentId,
     manualGymUntilByAgentId,
     pendingStandupRequest,
     phoneBoothHoldByAgentId,
@@ -2324,6 +2799,14 @@ export function OfficeScreen({
           Boolean(immediateGymHoldByAgentId[agent.agentId]),
         ]),
       );
+      const prevKeys = Object.keys(previous);
+      const nextKeys = Object.keys(next);
+      if (
+        prevKeys.length === nextKeys.length &&
+        nextKeys.every((key) => previous[key] === next[key])
+      ) {
+        return previous;
+      }
       return next;
     });
   }, [immediateGymHoldByAgentId, state.agents]);
@@ -3453,6 +3936,109 @@ export function OfficeScreen({
       }) ?? null,
     [marketplace.skillsReport],
   );
+  const soundclawSkill = useMemo<SkillStatusEntry | null>(
+    () =>
+      marketplace.skillsReport?.skills.find((skill) => {
+        const normalizedKey = skill.skillKey.trim().toLowerCase();
+        const normalizedName = skill.name.trim().toLowerCase();
+        return normalizedKey === "soundclaw" || normalizedName === "soundclaw";
+      }) ?? null,
+    [marketplace.skillsReport],
+  );
+  const soundclawReady = useMemo(
+    () => (soundclawSkill ? deriveSkillReadinessState(soundclawSkill) === "ready" : false),
+    [soundclawSkill]
+  );
+
+  useEffect(() => {
+    if (!soundclawReady || !jukeboxToken) {
+      return;
+    }
+
+    const pending = pendingJukeboxCommandTimeoutsRef.current;
+    const activeAgentIds = new Set<string>();
+
+    for (const agent of state.agents) {
+      if (skillTriggers.movementTargetByAgentId[agent.agentId] !== "jukebox") {
+        continue;
+      }
+
+      const request = getLatestUserRequestForAgent(agent);
+      if (!request) {
+        continue;
+      }
+
+      activeAgentIds.add(agent.agentId);
+      const handledKey = handledJukeboxRequestKeyByAgentIdRef.current[agent.agentId];
+      if (handledKey === request.requestKey) {
+        continue;
+      }
+
+      const existing = pending.get(agent.agentId);
+      if (existing?.requestKey === request.requestKey) {
+        continue;
+      }
+      if (existing) {
+        window.clearTimeout(existing.timeoutId);
+        pending.delete(agent.agentId);
+      }
+
+      const timeoutId = window.setTimeout(() => {
+        void executeBrowserJukeboxCommand(request.text).then((result) => {
+          if (result.ok) {
+            handledJukeboxRequestKeyByAgentIdRef.current[agent.agentId] = request.requestKey;
+            setJukeboxOpen(true);
+            dispatch({
+              type: "appendOutput",
+              agentId: agent.agentId,
+              line: result.reply,
+              transcript: {
+                role: "assistant",
+                kind: "assistant",
+                source: "legacy",
+                sessionKey: agent.sessionKey,
+                timestampMs: Date.now(),
+                confirmed: true,
+              },
+            });
+            dispatch({
+              type: "updateAgent",
+              agentId: agent.agentId,
+              patch: {
+                latestOverride: result.reply,
+                latestOverrideKind: null,
+                latestPreview: result.reply,
+                lastAssistantMessageAt: Date.now(),
+              },
+            });
+          }
+          const latest = pendingJukeboxCommandTimeoutsRef.current.get(agent.agentId);
+          if (latest?.timeoutId === timeoutId) {
+            pendingJukeboxCommandTimeoutsRef.current.delete(agent.agentId);
+          }
+        });
+      }, 1400);
+
+      pending.set(agent.agentId, {
+        requestKey: request.requestKey,
+        timeoutId,
+      });
+    }
+
+    for (const [agentId, pendingEntry] of pending.entries()) {
+      if (activeAgentIds.has(agentId)) continue;
+      window.clearTimeout(pendingEntry.timeoutId);
+      pending.delete(agentId);
+    }
+  }, [
+    jukeboxToken,
+    skillTriggers.movementTargetByAgentId,
+    soundclawReady,
+    state.agents,
+  ]);
+
+  // No longer force-close the jukebox panel when skill is disabled;
+  // the panel handles the disabled state itself.
 
   if (
     !agentsLoaded &&
@@ -3497,6 +4083,7 @@ export function OfficeScreen({
       agent.status === "running" ||
       deskHoldByAgentId[agent.agentId] ||
       gymHoldByAgentId[agent.agentId] ||
+      jukeboxHoldByAgentId[agent.agentId] ||
       phoneBoothHoldByAgentId[agent.agentId] ||
       smsBoothHoldByAgentId[agent.agentId] ||
       qaHoldByAgentId[agent.agentId],
@@ -3515,6 +4102,7 @@ export function OfficeScreen({
       <section className="relative h-full min-h-0 min-w-0 overflow-hidden">
         <RetroOffice3D
           agents={allVisibleAgents}
+          officeCenterSignal={officeCameraCenterSignal}
           animationState={officeAnimationState}
           deskAssignmentByDeskUid={deskAssignmentByDeskUid}
           githubReviewAgentId={githubReviewAgentId}
@@ -3526,6 +4114,7 @@ export function OfficeScreen({
           monitorAgentId={monitorAgentId}
           monitorByAgentId={monitorByAgentId}
           githubSkill={githubSkill}
+          soundclawEnabled={soundclawReady}
           officeTitle={officeTitle}
           officeTitleLoaded={officeTitleLoaded}
           remoteOfficeEnabled={remoteOfficeEnabled}
@@ -3615,7 +4204,27 @@ export function OfficeScreen({
           onOpenGithubSkillSetup={() => {
             setMarketplaceOpen(true);
           }}
+          onJukeboxInteract={() => {
+            setJukeboxOpen(true);
+          }}
         />
+        {jukeboxOpen ? (
+          soundclawReady ? (
+            <JukeboxPanel
+              client={client}
+              onClose={() => setJukeboxOpen(false)}
+              selectedAgentName={focusedChatAgent?.name ?? null}
+            />
+          ) : (
+            <JukeboxDisabledPanel
+              onClose={() => setJukeboxOpen(false)}
+              onInstall={() => {
+                setJukeboxOpen(false);
+                setMarketplaceOpen(true);
+              }}
+            />
+          )
+        ) : null}
       </section>
 
       {showEmptyFleetBanner ? (
@@ -3637,6 +4246,15 @@ export function OfficeScreen({
                   }}
                 >
                   Add Agent
+                </button>
+                <button
+                  type="button"
+                  className="ui-btn-secondary px-3 py-2 text-xs font-semibold tracking-[0.05em] text-foreground"
+                  onClick={() => {
+                    handleOpenCompanyBuilder();
+                  }}
+                >
+                  Build Company
                 </button>
                 <button
                   type="button"
@@ -3673,6 +4291,7 @@ export function OfficeScreen({
           onTabChange={setActiveSidebarTab}
           onOpenMarketplace={() => setMarketplaceOpen(true)}
           onAddAgent={handleOpenCreateAgentWizard}
+          onOpenCompanyBuilder={handleOpenCompanyBuilder}
           inboxPanel={
             <InboxPanel
               agents={state.agents}
@@ -3734,6 +4353,7 @@ export function OfficeScreen({
 
       {showOnboardingWizard ? (
         <OnboardingWizard
+          key={companyCreatedSignal > 0 ? `onboarding-company-created-${companyCreatedSignal}` : "onboarding-default"}
           gatewayConnected={status === "connected"}
           agentCount={state.agents.length}
           gatewayUrl={gatewayUrl}
@@ -3744,6 +4364,15 @@ export function OfficeScreen({
             void connect();
           }}
           onComplete={handleCompleteOnboarding}
+          onOpenCompanyBuilder={handleOpenCompanyBuilder}
+          initialStep={companyCreatedSignal > 0 ? "complete" : "welcome"}
+          initialCompletedSteps={
+            companyCreatedSignal > 0
+              ? ["welcome", "prerequisites", "connect", "agents", "company", "complete"]
+              : undefined
+          }
+          createdCompanyName={createdCompanyName}
+          companyCreated={companyCreatedSignal > 0}
           connectionError={gatewayError}
           connecting={status === "connecting"}
         />
@@ -4253,7 +4882,7 @@ export function OfficeScreen({
         />
       ) : null}
       <AgentCreateWizardModal
-        key={createAgentWizardNonce}
+        key={`create-agent-${createAgentWizardNonce}`}
         open={createAgentWizardOpen}
         suggestedName={`Agent ${state.agents.length + 1}`}
         busy={createAgentBusy}
@@ -4262,6 +4891,23 @@ export function OfficeScreen({
         onClose={handleCloseCreateAgentWizard}
         onCreateAgent={handleCreateAgentFromIdentity}
         onFinishWizard={handleFinishCreateAgentAvatar}
+      />
+      <CompanyBuilderModal
+        key={`company-builder-${companyBuilderNonce}`}
+        open={companyBuilderOpen}
+        connected={status === "connected"}
+        agentCount={state.agents.length}
+        plannerAgentName={plannerAgent?.name ?? null}
+        busy={companyBuilderBusy}
+        error={companyBuilderError}
+        statusLine={companyBuilderStatusLine}
+        initialInput={companyBuilderInput}
+        initialPlan={lastCompanyPlan}
+        onClose={handleCloseCompanyBuilder}
+        onClear={handleClearCompanyBuilder}
+        onImproveBrief={handleImproveCompanyBrief}
+        onGeneratePlan={handleGenerateCompanyPlan}
+        onCreateCompany={handleCreateCompanyFromPlan}
       />
     </main>
   );
