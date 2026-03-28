@@ -18,7 +18,7 @@ describe("resolveGatewayAutoRetryDelayMs", () => {
     expect(delay).toBeNull();
   });
 
-  it("retries for non-auth connect failures", () => {
+  it("does not retry when the upstream websocket upgrade fails", () => {
     const delay = resolveGatewayAutoRetryDelayMs({
       status: "disconnected",
       didAutoConnect: true,
@@ -31,8 +31,7 @@ describe("resolveGatewayAutoRetryDelayMs", () => {
       attempt: 0,
     });
 
-    expect(delay).toBeTypeOf("number");
-    expect(delay).toBeGreaterThan(0);
+    expect(delay).toBeNull();
   });
 });
 

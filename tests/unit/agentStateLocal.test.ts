@@ -39,5 +39,18 @@ describe("agent state local", () => {
     expect(fs.existsSync(agentDir)).toBe(true);
     expect(fs.readFileSync(path.join(workspace, "hello.txt"), "utf8")).toBe("hi");
   });
+
+  it("rejects restore paths outside the agent-state trash root", () => {
+    const stateDir = mkTmpStateDir();
+    process.env.OPENCLAW_STATE_DIR = stateDir;
+
+    const agentId = "test-agent";
+    const fakeTrashDir = path.join(stateDir, "agents", agentId);
+    fs.mkdirSync(fakeTrashDir, { recursive: true });
+
+    expect(() => restoreAgentStateLocally({ agentId, trashDir: fakeTrashDir })).toThrow(
+      "trashDir is not under"
+    );
+  });
 });
 

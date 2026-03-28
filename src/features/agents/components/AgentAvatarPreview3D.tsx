@@ -8,6 +8,7 @@ import {
   type AgentAvatarProfile,
   createDefaultAgentAvatarProfile,
 } from "@/lib/avatars/profile";
+import { RunningAvatarLoader } from "@/features/agents/components/RunningAvatarLoader";
 
 const PreviewFigure = ({
   profile,
@@ -305,23 +306,18 @@ export const AgentAvatarPreview3D = ({
     () => profile ?? createDefaultAgentAvatarProfile("preview"),
     [profile]
   );
-  const [isReady, setIsReady] = useState(false);
-
-  useEffect(() => {
-    setIsReady(false);
-  }, [resolvedProfile]);
+  const profileKey = useMemo(() => JSON.stringify(resolvedProfile), [resolvedProfile]);
+  const [readyProfileKey, setReadyProfileKey] = useState<string | null>(null);
+  const isReady = readyProfileKey === profileKey;
 
   return (
     <div className={`relative ${className}`}>
       {!isReady ? (
         <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-[#070b16] text-white/70">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/15 border-t-cyan-300" />
-          <div className="font-mono text-[11px] tracking-[0.08em] text-white/55">
-            Loading avatar...
-          </div>
+          <RunningAvatarLoader size={26} trackWidth={72} label="Loading avatar..." />
         </div>
       ) : null}
-      <Canvas camera={{ position: [0, 0.7, 2.5], fov: 34 }}>
+      <Canvas key={profileKey} camera={{ position: [0, 0.7, 2.5], fov: 34 }}>
         <color attach="background" args={["#070b16"]} />
         <ambientLight intensity={1.4} />
         <directionalLight position={[3, 4, 5]} intensity={2.4} />
@@ -329,7 +325,7 @@ export const AgentAvatarPreview3D = ({
         <PreviewFigure
           profile={resolvedProfile}
           onFirstFrame={() => {
-            setIsReady(true);
+            setReadyProfileKey(profileKey);
           }}
         />
         <Environment preset="city" />

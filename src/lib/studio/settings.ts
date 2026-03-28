@@ -64,10 +64,53 @@ export type StudioVoiceRepliesPreferencePatch = {
 
 export type StudioOfficePreference = {
   title: string;
+  remoteOfficeEnabled: boolean;
+  remoteOfficeSourceKind: "presence_endpoint" | "openclaw_gateway";
+  remoteOfficeLabel: string;
+  remoteOfficePresenceUrl: string;
+  remoteOfficeGatewayUrl: string;
+  remoteOfficeToken: string;
+  companyName: string;
+  companyPrompt: string;
+  companyImprovedBrief: string;
+  companySummary: string;
+  companyGeneratedAt: string | null;
+  companyRoleTitles: string[];
+  companyPlanJson: string;
+};
+
+export type StudioOfficePreferencePublic = {
+  title: string;
+  remoteOfficeEnabled: boolean;
+  remoteOfficeSourceKind: "presence_endpoint" | "openclaw_gateway";
+  remoteOfficeLabel: string;
+  remoteOfficePresenceUrl: string;
+  remoteOfficeGatewayUrl: string;
+  remoteOfficeTokenConfigured: boolean;
+  companyName: string;
+  companyPrompt: string;
+  companyImprovedBrief: string;
+  companySummary: string;
+  companyGeneratedAt: string | null;
+  companyRoleTitles: string[];
+  companyPlanJson: string;
 };
 
 export type StudioOfficePreferencePatch = {
   title?: string | null;
+  remoteOfficeEnabled?: boolean;
+  remoteOfficeSourceKind?: "presence_endpoint" | "openclaw_gateway";
+  remoteOfficeLabel?: string | null;
+  remoteOfficePresenceUrl?: string | null;
+  remoteOfficeGatewayUrl?: string | null;
+  remoteOfficeToken?: string | null;
+  companyName?: string | null;
+  companyPrompt?: string | null;
+  companyImprovedBrief?: string | null;
+  companySummary?: string | null;
+  companyGeneratedAt?: string | null;
+  companyRoleTitles?: string[] | null;
+  companyPlanJson?: string | null;
 };
 
 export type StudioDeskAssignments = Record<string, string>;
@@ -102,8 +145,9 @@ export type StudioSettings = {
   standup?: Record<string, StudioStandupPreference>;
 };
 
-export type StudioSettingsPublic = Omit<StudioSettings, "gateway" | "standup"> & {
+export type StudioSettingsPublic = Omit<StudioSettings, "gateway" | "office" | "standup"> & {
   gateway: StudioGatewaySettingsPublic | null;
+  office: Record<string, StudioOfficePreferencePublic>;
   standup?: Record<string, StudioStandupPreferencePublic>;
 };
 
@@ -271,6 +315,8 @@ const normalizeOptionalIsoString = (
 };
 
 const DEFAULT_OFFICE_TITLE = "Luke Headquarters";
+const DEFAULT_REMOTE_OFFICE_LABEL = "Remote Office";
+const DEFAULT_REMOTE_OFFICE_SOURCE_KIND = "presence_endpoint" as const;
 
 const normalizeOfficeTitle = (
   value: unknown,
@@ -280,8 +326,110 @@ const normalizeOfficeTitle = (
   return (title || fallback).slice(0, 48);
 };
 
+const normalizeRemoteOfficeLabel = (
+  value: unknown,
+  fallback: string = DEFAULT_REMOTE_OFFICE_LABEL
+) => {
+  const label = coerceString(value);
+  return (label || fallback).slice(0, 48);
+};
+
+const normalizeRemoteOfficePresenceUrl = (value: unknown) => {
+  const raw = coerceString(value);
+  return raw.replace(/\/+$/, "");
+};
+
+const normalizeRemoteOfficeSourceKind = (
+  value: unknown,
+  fallback: StudioOfficePreference["remoteOfficeSourceKind"] = DEFAULT_REMOTE_OFFICE_SOURCE_KIND,
+): StudioOfficePreference["remoteOfficeSourceKind"] => {
+  const kind = coerceString(value);
+  if (kind === "presence_endpoint" || kind === "openclaw_gateway") {
+    return kind;
+  }
+  return fallback;
+};
+
+const normalizeRemoteOfficeGatewayUrl = (value: unknown) => {
+  const raw = coerceString(value);
+  if (!raw) return "";
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol === "http:") {
+      return `ws://${parsed.host}${parsed.pathname}${parsed.search}${parsed.hash}`;
+    }
+    if (parsed.protocol === "https:") {
+      return `wss://${parsed.host}${parsed.pathname}${parsed.search}${parsed.hash}`;
+    }
+    return raw.replace(/\/+$/, "");
+  } catch {
+    return raw.replace(/\/+$/, "");
+  }
+};
+
+const normalizeCompanyField = (value: unknown) => coerceString(value).slice(0, 10_000);
+
+const normalizeCompanyRoleTitles = (value: unknown, fallback: string[] = []) => {
+  if (!Array.isArray(value)) return fallback;
+  return value
+    .filter((entry): entry is string => typeof entry === "string")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0)
+    .slice(0, 32);
+};
+
 export const defaultStudioOfficePreference = (): StudioOfficePreference => ({
   title: DEFAULT_OFFICE_TITLE,
+  remoteOfficeEnabled: false,
+  remoteOfficeSourceKind: DEFAULT_REMOTE_OFFICE_SOURCE_KIND,
+  remoteOfficeLabel: DEFAULT_REMOTE_OFFICE_LABEL,
+  remoteOfficePresenceUrl: "",
+  remoteOfficeGatewayUrl: "",
+  remoteOfficeToken: "",
+  companyName: "",
+  companyPrompt: "",
+  companyImprovedBrief: "",
+  companySummary: "",
+  companyGeneratedAt: null,
+  companyRoleTitles: [],
+  companyPlanJson: "",
+});
+
+export const defaultStudioOfficePreferencePublic =
+  (): StudioOfficePreferencePublic => ({
+    title: DEFAULT_OFFICE_TITLE,
+    remoteOfficeEnabled: false,
+    remoteOfficeSourceKind: DEFAULT_REMOTE_OFFICE_SOURCE_KIND,
+    remoteOfficeLabel: DEFAULT_REMOTE_OFFICE_LABEL,
+    remoteOfficePresenceUrl: "",
+    remoteOfficeGatewayUrl: "",
+    remoteOfficeTokenConfigured: false,
+    companyName: "",
+    companyPrompt: "",
+    companyImprovedBrief: "",
+    companySummary: "",
+    companyGeneratedAt: null,
+    companyRoleTitles: [],
+    companyPlanJson: "",
+  });
+
+export const sanitizeStudioOfficePreference = (
+  value: StudioOfficePreference
+): StudioOfficePreferencePublic => ({
+  title: value.title,
+  remoteOfficeEnabled: value.remoteOfficeEnabled,
+  remoteOfficeSourceKind: value.remoteOfficeSourceKind,
+  remoteOfficeLabel: value.remoteOfficeLabel,
+  remoteOfficePresenceUrl: value.remoteOfficePresenceUrl,
+  remoteOfficeGatewayUrl: value.remoteOfficeGatewayUrl,
+  remoteOfficeTokenConfigured: value.remoteOfficeToken.length > 0,
+  companyName: value.companyName,
+  companyPrompt: value.companyPrompt,
+  companyImprovedBrief: value.companyImprovedBrief,
+  companySummary: value.companySummary,
+  companyGeneratedAt: value.companyGeneratedAt,
+  companyRoleTitles: value.companyRoleTitles,
+  companyPlanJson: value.companyPlanJson,
 });
 
 const normalizeStandupScheduleConfig = (
@@ -554,6 +702,41 @@ const normalizeOfficePreference = (
   if (!isRecord(value)) return fallback;
   return {
     title: normalizeOfficeTitle(value.title, fallback.title),
+    remoteOfficeEnabled:
+      typeof value.remoteOfficeEnabled === "boolean"
+        ? value.remoteOfficeEnabled
+        : fallback.remoteOfficeEnabled,
+    remoteOfficeSourceKind: normalizeRemoteOfficeSourceKind(
+      value.remoteOfficeSourceKind,
+      fallback.remoteOfficeSourceKind,
+    ),
+    remoteOfficeLabel: normalizeRemoteOfficeLabel(
+      value.remoteOfficeLabel,
+      fallback.remoteOfficeLabel
+    ),
+    remoteOfficePresenceUrl: normalizeRemoteOfficePresenceUrl(
+      value.remoteOfficePresenceUrl ?? value.remoteOfficeUrl,
+    ),
+    remoteOfficeGatewayUrl: normalizeRemoteOfficeGatewayUrl(value.remoteOfficeGatewayUrl),
+    remoteOfficeToken:
+      value.remoteOfficeToken === null
+        ? ""
+        : coerceString(value.remoteOfficeToken) || fallback.remoteOfficeToken,
+    companyName: normalizeCompanyField(value.companyName ?? fallback.companyName),
+    companyPrompt: normalizeCompanyField(value.companyPrompt ?? fallback.companyPrompt),
+    companyImprovedBrief: normalizeCompanyField(
+      value.companyImprovedBrief ?? fallback.companyImprovedBrief
+    ),
+    companySummary: normalizeCompanyField(value.companySummary ?? fallback.companySummary),
+    companyGeneratedAt: normalizeOptionalIsoString(
+      value.companyGeneratedAt,
+      fallback.companyGeneratedAt
+    ),
+    companyRoleTitles: normalizeCompanyRoleTitles(
+      value.companyRoleTitles,
+      fallback.companyRoleTitles
+    ),
+    companyPlanJson: normalizeCompanyField(value.companyPlanJson ?? fallback.companyPlanJson),
   };
 };
 
@@ -610,6 +793,12 @@ export const sanitizeStudioSettings = (
 ): StudioSettingsPublic => ({
   ...value,
   gateway: sanitizeStudioGatewaySettings(value.gateway),
+  office: Object.fromEntries(
+    Object.entries(value.office).map(([gatewayKey, preference]) => [
+      gatewayKey,
+      sanitizeStudioOfficePreference(preference),
+    ]),
+  ),
   standup: Object.fromEntries(
     Object.entries(value.standup ?? {}).map(([gatewayKey, preference]) => [
       gatewayKey,
@@ -895,12 +1084,21 @@ export const resolveVoiceRepliesPreference = (
 };
 
 export const resolveOfficePreference = (
-  settings: StudioSettings | StudioSettingsPublic,
+  settings: StudioSettings,
   gatewayUrl: string
 ): StudioOfficePreference => {
   const gatewayKey = normalizeGatewayKey(gatewayUrl);
   if (!gatewayKey) return defaultStudioOfficePreference();
   return settings.office[gatewayKey] ?? defaultStudioOfficePreference();
+};
+
+export const resolveOfficePreferencePublic = (
+  settings: StudioSettingsPublic,
+  gatewayUrl: string
+): StudioOfficePreferencePublic => {
+  const gatewayKey = normalizeGatewayKey(gatewayUrl);
+  if (!gatewayKey) return defaultStudioOfficePreferencePublic();
+  return settings.office[gatewayKey] ?? defaultStudioOfficePreferencePublic();
 };
 
 export const resolveStandupPreference = (

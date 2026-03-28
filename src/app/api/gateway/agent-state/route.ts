@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { restoreAgentStateLocally, trashAgentStateLocally } from "@/lib/agent-state/local";
-import { isLocalGatewayUrl } from "@/lib/gateway/local-gateway";
+import { isLikelyLocalGatewayUrl } from "@/lib/gateway/local-gateway";
 import {
   resolveConfiguredSshTarget,
   resolveGatewaySshTargetFromGatewayUrl,
@@ -30,7 +30,7 @@ const resolveAgentStateSshTarget = (): string | null => {
   if (configured) return configured;
   const settings = loadStudioSettings();
   const gatewayUrl = settings.gateway?.url ?? "";
-  if (isLocalGatewayUrl(gatewayUrl)) return null;
+  if (isLikelyLocalGatewayUrl(gatewayUrl)) return null;
   return resolveGatewaySshTargetFromGatewayUrl(gatewayUrl, process.env);
 };
 
@@ -63,6 +63,9 @@ export async function POST(request: Request) {
       message.includes("agentId is required") ||
       message.includes("trashDir is required") ||
       message.includes("Invalid agentId") ||
+      message.includes("trashDir does not exist") ||
+      message.includes("trashDir is not under") ||
+      message.includes("Refusing to restore over existing path") ||
       message.includes("Gateway URL is missing") ||
       message.includes("Invalid gateway URL") ||
       message.includes("require OPENCLAW_GATEWAY_SSH_TARGET")

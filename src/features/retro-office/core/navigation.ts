@@ -1,7 +1,4 @@
-import {
-  CANVAS_H,
-  CANVAS_W,
-} from "@/features/retro-office/core/constants";
+import { CANVAS_H, CANVAS_W } from "@/features/retro-office/core/constants";
 import {
   getItemBounds,
   ITEM_FOOTPRINT,
@@ -171,11 +168,15 @@ export function astar(
   let { c: ec, r: er } = toCell(ex, ey);
   const startFree = findFree(sc, sr);
   const endFree = findFree(ec, er);
-  if (!startFree || !endFree) return [{ x: ex, y: ey }];
+  if (!startFree || !endFree) return [];
   sc = startFree.c;
   sr = startFree.r;
   ec = endFree.c;
   er = endFree.r;
+  // Same nav cell: start and end are close enough that A* has no grid edges
+  // to traverse. The destination is still reachable — return a single-waypoint
+  // path to the exact target pixel so the movement layer can make the final
+  // fine-grained adjustment instead of staying put.
   if (sc === ec && sr === er) return [{ x: ex, y: ey }];
 
   const nodeCount = GRID_COLS * GRID_ROWS;
@@ -277,8 +278,10 @@ export function astar(
       // agents cannot clip through the corner of a blocked cell (issue #6).
       // E.g. moving NE (dc=+1, dr=-1) requires N (dc=0, dr=-1) and E (dc=+1, dr=0) to be clear.
       if (columnOffset !== 0 && rowOffset !== 0) {
-        const orthogonalA = (currentRow + rowOffset) * GRID_COLS + currentColumn;
-        const orthogonalB = currentRow * GRID_COLS + (currentColumn + columnOffset);
+        const orthogonalA =
+          (currentRow + rowOffset) * GRID_COLS + currentColumn;
+        const orthogonalB =
+          currentRow * GRID_COLS + (currentColumn + columnOffset);
         if (grid[orthogonalA] || grid[orthogonalB]) continue;
       }
       const nextCost = gCost[current] + cost;
@@ -293,7 +296,7 @@ export function astar(
     }
   }
 
-  return [{ x: ex, y: ey }];
+  return [];
 }
 
 export const getDeskLocations = (items: FurnitureItem[]) =>

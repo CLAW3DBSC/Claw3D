@@ -53,6 +53,13 @@ const DEFAULT_SMS_BOOTH: FurnitureSeed = {
   facing: 0,
 };
 
+const DEFAULT_JUKEBOX: FurnitureSeed = {
+  type: "jukebox",
+  x: 20,
+  y: 380,
+  facing: 90,
+};
+
 const PREVIOUS_SERVER_ROOM_ITEMS_BOTTOM_RIGHT: FurnitureSeed[] = [
   { type: "wall", x: 820, y: 540, w: 280, h: WALL_THICKNESS },
   { type: "wall", x: 820, y: 540, w: WALL_THICKNESS, h: 70 },
@@ -167,8 +174,7 @@ const LEGACY_QA_LAB_ITEMS: FurnitureSeed[] = [
 ];
 
 const EAST_WING_ROOM_BOTTOM_Y = EAST_WING_ROOM_TOP_Y + EAST_WING_ROOM_HEIGHT;
-const EAST_WING_ROOM_BOTTOM_WALL_Y =
-  EAST_WING_ROOM_BOTTOM_Y - WALL_THICKNESS;
+const EAST_WING_ROOM_BOTTOM_WALL_Y = EAST_WING_ROOM_BOTTOM_Y - WALL_THICKNESS;
 const EAST_WING_DOOR_BOTTOM_Y = EAST_WING_DOOR_Y + DOOR_LENGTH;
 const EAST_WING_TOP_WALL_HEIGHT = EAST_WING_DOOR_Y - EAST_WING_ROOM_TOP_Y;
 const EAST_WING_BOTTOM_WALL_HEIGHT =
@@ -558,15 +564,10 @@ const QA_LAB_SIGNATURES = new Set(
   DEFAULT_QA_LAB_ITEMS.map(createFurnitureSignature),
 );
 
-const hasSignature = (
-  items: FurnitureItem[],
-  signatures: Set<string>,
-) => items.some((item) => signatures.has(createFurnitureSignature(item)));
+const hasSignature = (items: FurnitureItem[], signatures: Set<string>) =>
+  items.some((item) => signatures.has(createFurnitureSignature(item)));
 
-const hasAllSignatures = (
-  items: FurnitureItem[],
-  signatures: Set<string>,
-) => {
+const hasAllSignatures = (items: FurnitureItem[], signatures: Set<string>) => {
   const itemSignatures = new Set(items.map(createFurnitureSignature));
   return [...signatures].every((signature) => itemSignatures.has(signature));
 };
@@ -574,8 +575,7 @@ const hasAllSignatures = (
 const replaceBySignatureSet = (
   items: FurnitureItem[],
   signatures: Set<string>,
-) =>
-  items.filter((item) => !signatures.has(createFurnitureSignature(item)));
+) => items.filter((item) => !signatures.has(createFurnitureSignature(item)));
 
 export const ensureOfficePingPongTable = (
   items: FurnitureItem[],
@@ -590,7 +590,14 @@ export const ensureOfficeAtm = (items: FurnitureItem[]): FurnitureItem[] => {
   return [...items, { ...DEFAULT_ATM_MACHINE, _uid: nextUid() }];
 };
 
-export const ensureOfficePhoneBooth = (items: FurnitureItem[]): FurnitureItem[] => {
+export const ensureOfficeJukebox = (items: FurnitureItem[]): FurnitureItem[] => {
+  if (items.some((item) => item.type === "jukebox")) return items;
+  return [...items, { ...DEFAULT_JUKEBOX, _uid: nextUid() }];
+};
+
+export const ensureOfficePhoneBooth = (
+  items: FurnitureItem[],
+): FurnitureItem[] => {
   let found = false;
   const nextItems = items.map((item) => {
     if (item.type === "phone_booth") {
@@ -607,7 +614,9 @@ export const ensureOfficePhoneBooth = (items: FurnitureItem[]): FurnitureItem[] 
   return [...nextItems, { ...DEFAULT_PHONE_BOOTH, _uid: nextUid() }];
 };
 
-export const ensureOfficeSmsBooth = (items: FurnitureItem[]): FurnitureItem[] => {
+export const ensureOfficeSmsBooth = (
+  items: FurnitureItem[],
+): FurnitureItem[] => {
   if (items.some((item) => item.type === "sms_booth")) return items;
   if (hasSmsBoothMigrationApplied()) return items;
   return [...items, { ...DEFAULT_SMS_BOOTH, _uid: nextUid() }];
@@ -666,7 +675,10 @@ export const ensureOfficeGymRoom = (
   const hasCurrentGymRoom = hasSignature(items, GYM_ROOM_SIGNATURES);
   if (hasCurrentGymRoom) return items;
 
-  const hasPreviousGymRoom = hasAllSignatures(items, PREVIOUS_GYM_ROOM_SIGNATURES);
+  const hasPreviousGymRoom = hasAllSignatures(
+    items,
+    PREVIOUS_GYM_ROOM_SIGNATURES,
+  );
   if (hasPreviousGymRoom) {
     return [
       ...replaceBySignatureSet(items, PREVIOUS_GYM_ROOM_SIGNATURES),
@@ -733,4 +745,3 @@ export const ensureOfficeQaLab = (items: FurnitureItem[]): FurnitureItem[] => {
     ...DEFAULT_QA_LAB_ITEMS.map((item) => ({ ...item, _uid: nextUid() })),
   ];
 };
-

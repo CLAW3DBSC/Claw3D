@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { isLocalGatewayUrl } from "@/lib/gateway/local-gateway";
+import { isLikelyLocalGatewayUrl } from "@/lib/gateway/local-gateway";
 import { removeSkillLocally } from "@/lib/skills/remove-local";
 import type { RemovableSkillSource, SkillRemoveRequest } from "@/lib/skills/types";
 import {
@@ -43,7 +43,7 @@ const resolveSkillRemovalSshTarget = (): string | null => {
   if (configured) return configured;
   const settings = loadStudioSettings();
   const gatewayUrl = settings.gateway?.url ?? "";
-  if (isLocalGatewayUrl(gatewayUrl)) return null;
+  if (isLikelyLocalGatewayUrl(gatewayUrl)) return null;
   return resolveGatewaySshTargetFromGatewayUrl(gatewayUrl, process.env);
 };
 
@@ -86,6 +86,7 @@ export async function POST(request: Request) {
       message.includes("Unsupported skill source") ||
       message.includes("Refusing to remove") ||
       message.includes("not a directory") ||
+      message.includes("Remote workspace skill removal is not supported over SSH") ||
       message.includes("Gateway URL is missing") ||
       message.includes("Invalid gateway URL") ||
       message.includes("require OPENCLAW_GATEWAY_SSH_TARGET") ||

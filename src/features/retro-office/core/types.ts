@@ -37,7 +37,7 @@ export type RenderAgent = SceneActor & {
   frame: number;
   walkSpeed: number;
   phaseOffset: number;
-  state: "walking" | "sitting" | "standing" | "away" | "working_out";
+  state: "walking" | "sitting" | "standing" | "away" | "working_out" | "dancing";
   awayUntil?: number;
   separationReplanAt?: number;
   bumpedUntil?: number;

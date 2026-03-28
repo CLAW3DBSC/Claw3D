@@ -34,6 +34,11 @@ export type DeleteAgentTransactionResult = {
   restored: RestoreAgentStateResult | null;
 };
 
+const EMPTY_TRASH_RESULT: TrashAgentStateResult = {
+  trashDir: "",
+  moved: [],
+};
+
 const runDeleteFlow = async (
   deps: DeleteAgentTransactionDeps,
   agentId: string
@@ -43,7 +48,15 @@ const runDeleteFlow = async (
     throw new Error("Agent id is required.");
   }
 
-  const trashed = await deps.trashAgentState(trimmedAgentId);
+  let trashed = EMPTY_TRASH_RESULT;
+  try {
+    trashed = await deps.trashAgentState(trimmedAgentId);
+  } catch (err) {
+    deps.logError?.(
+      "Failed to move agent workspace/state into trash. Continuing with gateway deletion only.",
+      err
+    );
+  }
   let removedCronJobs: CronJobRestoreInput[] = [];
 
   try {
@@ -115,4 +128,50 @@ export const deleteAgentViaStudio = async (params: {
     },
     params.agentId
   );
+};
+
+export const deleteAgentRecordViaStudio = async (params: {
+  client: GatewayClient;
+  agentId: string;
+  logError?: (message: string, error: unknown) => void;
+}): Promise<void> => {
+  const trimmedAgentId = params.agentId.trim();
+  if (!trimmedAgentId) {
+    throw new Error("Agent id is required.");
+  }
+  const logError = params.logError ?? ((message, error) => console.error(message, error));
+  let removedCronJobs: CronJobRestoreInput[] = [];
+  try {
+    removedCronJobs = await removeCronJobsForAgentWithBackup(params.client, trimmedAgentId);
+    await deleteGatewayAgent({ client: params.client, agentId: trimmedAgentId });
+  } catch (err) {
+    if (removedCronJobs.length > 0) {
+      try {
+        await restoreCronJobs(params.client, removedCronJobs);
+      } catch (restoreErr) {
+        logError("Failed to restore removed cron jobs.", restoreErr);
+      }
+    }
+    throw err;
+  }
+};
+
+export const trashAgentStateViaStudio = async (params: {
+  agentId: string;
+  fetchJson?: FetchJson;
+}): Promise<TrashAgentStateResult> => {
+  const trimmedAgentId = params.agentId.trim();
+  if (!trimmedAgentId) {
+    throw new Error("Agent id is required.");
+  }
+  const fetchJson = params.fetchJson ?? defaultFetchJson;
+  const { result } = await fetchJson<{ result: TrashAgentStateResult }>(
+    "/api/gateway/agent-state",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ agentId: trimmedAgentId }),
+    }
+  );
+  return result;
 };

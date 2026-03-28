@@ -147,4 +147,31 @@ describe("skills remove route", () => {
     });
     expect(fs.existsSync(skillDir)).toBe(false);
   });
+
+  it("rejects remote workspace skill removal over ssh", async () => {
+    writeStudioSettings("ws://example.test:18789");
+
+    mockedSpawnSync.mockReturnValueOnce({
+      status: 1,
+      stdout: "",
+      stderr: "Remote workspace skill removal is not supported over SSH.",
+      error: undefined,
+    } as never);
+
+    const response = await POST(
+      new Request("http://localhost/api/gateway/skills/remove", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          skillKey: "github",
+          source: "openclaw-workspace",
+          baseDir: "/home/ubuntu/workspace-main/skills/github",
+          workspaceDir: "/home/ubuntu/workspace-main",
+          managedSkillsDir: "/home/ubuntu/.openclaw/skills",
+        }),
+      })
+    );
+
+    expect(response.status).toBe(400);
+  });
 });

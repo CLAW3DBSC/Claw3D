@@ -55,5 +55,8 @@ describe("agent state ssh executor", () => {
         input: expect.stringContaining('python3 - "$1" "$2"'),
       })
     );
+    const call = mockedRunSshJson.mock.calls[0]?.[0];
+    expect(call?.input).toContain('trash_root = base / "trash" / "studio-delete-agent"');
+    expect(call?.input).toContain('trashDir is not under {trash_root}');
   });
 });

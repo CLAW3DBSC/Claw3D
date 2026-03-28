@@ -74,6 +74,7 @@ if not trash_dir_raw:
   raise SystemExit("trashDir is required.")
 
 base = pathlib.Path.home() / ".openclaw"
+trash_root = base / "trash" / "studio-delete-agent"
 trash_dir = pathlib.Path(trash_dir_raw).expanduser()
 
 try:
@@ -81,9 +82,9 @@ try:
 except FileNotFoundError:
   raise SystemExit(f"trashDir does not exist: {trash_dir_raw}")
 
-resolved_base = base.resolve(strict=False)
-if resolved_base not in resolved_trash.parents:
-  raise SystemExit(f"trashDir is not under {base}: {trash_dir_raw}")
+resolved_trash_root = trash_root.resolve(strict=False)
+if resolved_trash != resolved_trash_root and resolved_trash_root not in resolved_trash.parents:
+  raise SystemExit(f"trashDir is not under {trash_root}: {trash_dir_raw}")
 
 moves = []
 

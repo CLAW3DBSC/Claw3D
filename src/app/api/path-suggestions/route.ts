@@ -42,8 +42,35 @@ const normalizeQuery = (query: string): string => {
   return `~/${withoutLeading}`;
 };
 
+const resolveRealPath = (value: string): string => {
+  const absolutePath = path.resolve(value);
+  try {
+    return fs.realpathSync(absolutePath);
+  } catch {
+    const missingSegments: string[] = [];
+    let currentPath = absolutePath;
+    while (true) {
+      if (fs.existsSync(currentPath)) {
+        try {
+          return path.join(fs.realpathSync(currentPath), ...missingSegments.reverse());
+        } catch {
+          return path.join(currentPath, ...missingSegments.reverse());
+        }
+      }
+      const parentPath = path.dirname(currentPath);
+      if (parentPath === currentPath) {
+        return absolutePath;
+      }
+      missingSegments.push(path.basename(currentPath));
+      currentPath = parentPath;
+    }
+  }
+};
+
 const isWithinHome = (target: string, home: string): boolean => {
-  const relative = path.relative(home, target);
+  const resolvedTarget = resolveRealPath(target);
+  const resolvedHome = resolveRealPath(home);
+  const relative = path.relative(resolvedHome, resolvedTarget);
   if (!relative) return true;
   return !relative.startsWith("..") && !path.isAbsolute(relative);
 };
