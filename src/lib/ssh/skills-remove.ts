@@ -35,13 +35,13 @@ if source not in allowed_sources:
   raise SystemExit(f"Unsupported skill source for removal: {source}")
 
 base_dir = pathlib.Path(base_dir_raw).expanduser().resolve(strict=False)
-workspace_dir = pathlib.Path(workspace_dir_raw).expanduser().resolve(strict=False)
-managed_skills_dir = pathlib.Path(managed_skills_dir_raw).expanduser().resolve(strict=False)
+state_dir = (pathlib.Path.home() / ".openclaw").resolve(strict=False)
+managed_skills_root = (state_dir / "skills").resolve(strict=False)
 
 if source == "openclaw-managed":
-  allowed_root = managed_skills_dir
+  allowed_root = managed_skills_root
 else:
-  allowed_root = (workspace_dir / "skills").resolve(strict=False)
+  raise SystemExit("Remote workspace skill removal is not supported over SSH.")
 
 try:
   base_dir.relative_to(allowed_root)

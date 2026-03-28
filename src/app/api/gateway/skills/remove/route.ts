@@ -76,6 +76,7 @@ export async function POST(request: Request) {
       message.includes("Unsupported skill source") ||
       message.includes("Refusing to remove") ||
       message.includes("not a directory") ||
+      message.includes("Remote workspace skill removal is not supported over SSH") ||
       message.includes("Gateway URL is missing") ||
       message.includes("Invalid gateway URL") ||
       message.includes("require OPENCLAW_GATEWAY_SSH_TARGET")
