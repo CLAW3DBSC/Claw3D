@@ -83,10 +83,14 @@ export const restoreAgentStateLocally = (params: {
   }
 
   const base = resolveStateDir();
+  const trashRoot = path.join(base, "trash", "studio-delete-agent");
   if (!fs.existsSync(trashDirRaw)) {
     throw new Error(`trashDir does not exist: ${trashDirRaw}`);
   }
-  const { resolvedCandidate: resolvedTrashDir } = ensureUnderBase(base, trashDirRaw);
+  // Validate trashDir is strictly under the expected trash root, not just anywhere under base.
+  // This prevents path traversal where an attacker could reference legitimate directories
+  // (e.g. base/agents/) as a "trashDir" and cause unintended file moves.
+  const { resolvedCandidate: resolvedTrashDir } = ensureUnderBase(trashRoot, trashDirRaw);
 
   const moves: GatewayAgentStateMove[] = [];
   const restoreIfExists = (src: string, dest: string) => {
