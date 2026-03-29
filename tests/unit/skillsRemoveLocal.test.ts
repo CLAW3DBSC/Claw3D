@@ -2,14 +2,23 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { removeSkillLocally } from "@/lib/skills/remove-local";
 
 const mkTmpDir = () => fs.mkdtempSync(path.join(os.tmpdir(), "claw3d-skill-remove-"));
 
 describe("skills remove local", () => {
+  const originalStateDir = process.env.OPENCLAW_STATE_DIR;
+
+  afterEach(() => {
+    if (originalStateDir === undefined) delete process.env.OPENCLAW_STATE_DIR;
+    else process.env.OPENCLAW_STATE_DIR = originalStateDir;
+  });
+
   it("removes a workspace skill directory", () => {
+    process.env.OPENCLAW_STATE_DIR = mkTmpDir();
+
     const workspaceDir = mkTmpDir();
     const managedSkillsDir = mkTmpDir();
     const skillDir = path.join(workspaceDir, "skills", "github");

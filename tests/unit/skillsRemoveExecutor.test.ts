@@ -54,5 +54,8 @@ describe("skills remove ssh executor", () => {
         input: expect.stringContaining('python3 - "$1" "$2" "$3" "$4" "$5"'),
       })
     );
+    const call = mockedRunSshJson.mock.calls[0]?.[0];
+    expect(call?.input).toContain('managed_skills_root = (state_dir / "skills").resolve(strict=False)');
+    expect(call?.input).toContain("Remote workspace skill removal is not supported over SSH.");
   });
 });
