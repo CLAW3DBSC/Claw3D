@@ -191,4 +191,113 @@ describe("studio settings normalization", () => {
       }),
     );
   });
+
+  it("normalizes task board cards per gateway", () => {
+    const normalized = normalizeStudioSettings({
+      taskBoard: {
+        " ws://localhost:18789 ": {
+          cards: [
+            {
+              id: " task-1 ",
+              title: "  Review kanban interaction  ",
+              status: "review",
+              source: "openclaw_event",
+              assignedAgentId: " agent-1 ",
+              createdAt: "2026-03-29T10:00:00.000Z",
+              updatedAt: "2026-03-29T10:05:00.000Z",
+              notes: [" note one ", " ", "note two"],
+            },
+          ],
+          selectedCardId: " task-1 ",
+        },
+      },
+    });
+
+    expect(normalized.taskBoard?.["ws://localhost:18789"]).toEqual(
+      expect.objectContaining({
+        selectedCardId: "task-1",
+        cards: [
+          expect.objectContaining({
+            id: "task-1",
+            title: "Review kanban interaction",
+            assignedAgentId: "agent-1",
+            notes: ["note one", "note two"],
+          }),
+        ],
+      }),
+    );
+  });
+
+  it("merges task board patches", () => {
+    const current = normalizeStudioSettings({
+      taskBoard: {
+        "ws://localhost:18789": {
+          cards: [
+            {
+              id: "task-1",
+              title: "Initial task",
+              description: "",
+              status: "todo",
+              source: "claw3d_manual",
+              sourceEventId: null,
+              assignedAgentId: null,
+              createdAt: "2026-03-29T10:00:00.000Z",
+              updatedAt: "2026-03-29T10:00:00.000Z",
+              playbookJobId: null,
+              runId: null,
+              channel: null,
+              externalThreadId: null,
+              lastActivityAt: null,
+              notes: [],
+              isArchived: false,
+              isInferred: false,
+            },
+          ],
+          selectedCardId: "task-1",
+        },
+      },
+    });
+
+    const merged = mergeStudioSettings(current, {
+      taskBoard: {
+        "ws://localhost:18789": {
+          cards: [
+            {
+              id: "task-2",
+              title: "Replacement task",
+              description: "",
+              status: "in_progress",
+              source: "claw3d_manual",
+              sourceEventId: null,
+              assignedAgentId: null,
+              createdAt: "2026-03-29T10:10:00.000Z",
+              updatedAt: "2026-03-29T10:10:00.000Z",
+              playbookJobId: null,
+              runId: null,
+              channel: null,
+              externalThreadId: null,
+              lastActivityAt: null,
+              notes: [],
+              isArchived: false,
+              isInferred: false,
+            },
+          ],
+          selectedCardId: "task-2",
+        },
+      },
+    });
+
+    expect(merged.taskBoard?.["ws://localhost:18789"]).toEqual(
+      expect.objectContaining({
+        selectedCardId: "task-2",
+        cards: [
+          expect.objectContaining({
+            id: "task-2",
+            title: "Replacement task",
+            status: "in_progress",
+          }),
+        ],
+      }),
+    );
+  });
 });

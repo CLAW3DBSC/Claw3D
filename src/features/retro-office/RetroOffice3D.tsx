@@ -15,6 +15,7 @@ import {
   X,
 } from "lucide-react";
 import {
+  type ComponentProps,
   memo,
   Suspense,
   useCallback,
@@ -29,6 +30,7 @@ import * as THREE from "three";
 import { SettingsPanel } from "@/features/office/components/panels/SettingsPanel";
 import { AtmImmersiveScreen } from "@/features/office/screens/AtmImmersiveScreen";
 import { GithubImmersiveScreen } from "@/features/office/screens/GithubImmersiveScreen";
+import { KanbanImmersiveScreen } from "@/features/office/screens/KanbanImmersiveScreen";
 import {
   PhoneBoothImmersiveScreen,
   type PhoneCallStep,
@@ -39,6 +41,8 @@ import {
 } from "@/features/office/screens/SmsBoothImmersiveScreen";
 import { StandupImmersiveScreen } from "@/features/office/screens/StandupImmersiveScreen";
 import type { OfficeUsageAnalyticsParams } from "@/features/office/hooks/useOfficeUsageAnalyticsViewModel";
+import type { AgentState } from "@/features/agents/state/store";
+import type { CronJobSummary } from "@/lib/cron/types";
 import { buildMockPhoneCallScenario } from "@/lib/office/call/mock";
 import type { MockPhoneCallScenario } from "@/lib/office/call/types";
 import { buildMockTextMessageScenario } from "@/lib/office/text/mock";
@@ -47,6 +51,10 @@ import type { OfficeDeskMonitor } from "@/lib/office/deskMonitor";
 import type { OfficeAnimationState } from "@/lib/office/eventTriggers";
 import type { StandupMeeting } from "@/lib/office/standup/types";
 import type { SkillStatusEntry } from "@/lib/skills/types";
+import type {
+  TaskBoardCard,
+  TaskBoardStatus,
+} from "@/features/office/tasks/types";
 import { extractSpeechImage } from "@/lib/text/speech-image";
 import { MonitorImmersiveContent as MonitorImmersiveOverlay } from "@/features/retro-office/overlays/MonitorImmersiveContent";
 import {
@@ -72,6 +80,7 @@ import {
 import {
   ensureOfficeAtm,
   ensureOfficeGymRoom,
+  ensureOfficeKanbanBoard,
   ensureOfficePhoneBooth,
   ensureOfficePingPongTable,
   ensureOfficeQaLab,
@@ -362,6 +371,12 @@ const PALETTE: PaletteEntry[] = [
   { type: "water_cooler", label: "Water", icon: "💧", defaults: {} },
   { type: "atm", label: "ATM", icon: "🏧", defaults: { facing: 270 } },
   { type: "jukebox", label: "Jukebox", icon: "🎵", defaults: { facing: 0 } },
+  {
+    type: "kanban_board",
+    label: "Kanban Board",
+    icon: "📌",
+    defaults: { w: 130, h: 65, facing: 90 },
+  },
   {
     type: "whiteboard",
     label: "Whiteboard",
@@ -2316,6 +2331,7 @@ export function RetroOffice3D({
   monitorAgentId = null,
   monitorByAgentId = EMPTY_MONITOR_MAP,
   githubSkill = null,
+  taskManagerEnabled = false,
   soundclawEnabled = false,
   officeTitle = "Luke Headquarters",
   officeTitleLoaded = false,
@@ -2365,6 +2381,28 @@ export function RetroOffice3D({
   onQaLabDismiss,
   onOpenGithubSkillSetup,
   onJukeboxInteract,
+  onKanbanInteract,
+  taskBoardAgents = [],
+  taskBoardCardsByStatus = {
+    todo: [],
+    in_progress: [],
+    blocked: [],
+    review: [],
+    done: [],
+  },
+  taskBoardSelectedCard = null,
+  taskBoardActiveRuns = [],
+  taskBoardCronJobs = [],
+  taskBoardCronLoading = false,
+  taskBoardCronError = null,
+  taskBoardCaptureDebug,
+  preferredKanbanAgentId = null,
+  onTaskBoardCreateCard,
+  onTaskBoardMoveCard,
+  onTaskBoardSelectCard,
+  onTaskBoardUpdateCard,
+  onTaskBoardDeleteCard,
+  onTaskBoardRefreshCronJobs,
 }: {
   agents: OfficeAgent[];
   officeCenterSignal?: number;
@@ -2398,6 +2436,7 @@ export function RetroOffice3D({
   monitorAgentId?: string | null;
   monitorByAgentId?: OfficeDeskMonitorMap;
   githubSkill?: SkillStatusEntry | null;
+  taskManagerEnabled?: boolean;
   soundclawEnabled?: boolean;
   officeTitle?: string;
   officeTitleLoaded?: boolean;
@@ -2453,10 +2492,44 @@ export function RetroOffice3D({
   onQaLabDismiss?: () => void;
   onOpenGithubSkillSetup?: () => void;
   onJukeboxInteract?: () => void;
+  onKanbanInteract?: () => void;
+  taskBoardAgents?: AgentState[];
+  taskBoardCardsByStatus?: Record<TaskBoardStatus, TaskBoardCard[]>;
+  taskBoardSelectedCard?: TaskBoardCard | null;
+  taskBoardActiveRuns?: Array<{
+    runId: string;
+    agentId: string;
+    label: string;
+  }>;
+  taskBoardCronJobs?: CronJobSummary[];
+  taskBoardCronLoading?: boolean;
+  taskBoardCronError?: string | null;
+  taskBoardCaptureDebug?: ComponentProps<
+    typeof KanbanImmersiveScreen
+  >["taskCaptureDebug"];
+  preferredKanbanAgentId?: string | null;
+  onTaskBoardCreateCard?: () => void;
+  onTaskBoardMoveCard?: (cardId: string, status: TaskBoardStatus) => void;
+  onTaskBoardSelectCard?: (cardId: string | null) => void;
+  onTaskBoardUpdateCard?: (
+    cardId: string,
+    patch: Partial<TaskBoardCard>,
+  ) => void;
+  onTaskBoardDeleteCard?: (cardId: string) => void;
+  onTaskBoardRefreshCronJobs?: () => void;
 }) {
   const resolvedCleaningCues = animationState?.cleaningCues ?? cleaningCues;
   const resolvedDanceUntilByAgentId =
     animationState?.danceUntilByAgentId ?? EMPTY_NUMBER_RECORD;
+  const kanbanDeskTaskCount = useMemo(
+    () =>
+      Object.entries(taskBoardCardsByStatus).reduce(
+        (total, [status, cards]) =>
+          status === "done" ? total : total + cards.length,
+        0,
+      ),
+    [taskBoardCardsByStatus],
+  );
   const resolvedDeskHoldByAgentId =
     animationState?.deskHoldByAgentId ?? deskHoldByAgentId;
   const resolvedGymHoldByAgentId =
@@ -2474,20 +2547,24 @@ export function RetroOffice3D({
       : EMPTY_BOOLEAN_RECORD);
   const resolvedJukeboxHoldByAgentId =
     animationState?.jukeboxHoldByAgentId ?? EMPTY_BOOLEAN_RECORD;
-  const isJukeboxActive = Object.values(resolvedJukeboxHoldByAgentId).some(Boolean);
+  const isJukeboxActive = Object.values(resolvedJukeboxHoldByAgentId).some(
+    Boolean,
+  );
 
   const [furniture, setFurniture] = useState<FurnitureItem[]>(() =>
-    ensureOfficeJukebox(
-      ensureOfficeQaLab(
-        ensureOfficeGymRoom(
-          ensureOfficeServerRoom(
-            ensureOfficePhoneBooth(
-              ensureOfficeSmsBooth(
-                ensureOfficeAtm(
-                  ensureOfficePingPongTable(
-                    (
-                      loadFurniture(storageNamespace) ?? materializeDefaults()
-                    ).filter((item) => !isRetiredPingPongLamp(item)),
+    ensureOfficeKanbanBoard(
+      ensureOfficeJukebox(
+        ensureOfficeQaLab(
+          ensureOfficeGymRoom(
+            ensureOfficeServerRoom(
+              ensureOfficePhoneBooth(
+                ensureOfficeSmsBooth(
+                  ensureOfficeAtm(
+                    ensureOfficePingPongTable(
+                      (
+                        loadFurniture(storageNamespace) ?? materializeDefaults()
+                      ).filter((item) => !isRetiredPingPongLamp(item)),
+                    ),
                   ),
                 ),
               ),
@@ -2536,6 +2613,7 @@ export function RetroOffice3D({
   const [spaceDown, setSpaceDown] = useState(false);
   const [spaceDragging, setSpaceDragging] = useState(false);
   const [standupBoardOpen, setStandupBoardOpen] = useState(false);
+  const [activeKanbanUid, setActiveKanbanUid] = useState<string | null>(null);
   const [agentRosterOpen, setAgentRosterOpen] = useState(false);
   const autoOpenedStandupIdRef = useRef<string | null>(null);
   // Idea 1 (original): hovered agent for tooltip overlay.
@@ -2605,6 +2683,7 @@ export function RetroOffice3D({
   const followAgentIdRef = useRef<string | null>(null);
   const prevMonitorAgentIdRef = useRef<string | null>(null);
   const prevAtmUidRef = useRef<string | null>(null);
+  const prevKanbanUidRef = useRef<string | null>(null);
   const prevSmsBoothViewRef = useRef<string | null>(null);
   const prevPhoneBoothViewRef = useRef<string | null>(null);
   const prevGithubViewRef = useRef<string | null>(null);
@@ -2904,6 +2983,20 @@ export function RetroOffice3D({
         : null,
     [activeAtmUid, furniture],
   );
+  const activeKanbanBoard = useMemo(
+    () =>
+      activeKanbanUid
+        ? (furniture.find(
+            (item) =>
+              item._uid === activeKanbanUid && item.type === "kanban_board",
+          ) ?? null)
+        : null,
+    [activeKanbanUid, furniture],
+  );
+  const kanbanBoardItem = useMemo(
+    () => furniture.find((item) => item.type === "kanban_board") ?? null,
+    [furniture],
+  );
   const atmImmersive = Boolean(activeAtm && atmImmersiveReady);
   const activeSmsBooth = useMemo(
     () => furniture.find((item) => item.type === "sms_booth") ?? null,
@@ -3008,6 +3101,7 @@ export function RetroOffice3D({
       (activeQaTerminalUid || (qaTestingAgentId && qaCommandArrived)),
     ) && qaImmersiveReady;
   const standupImmersive = Boolean(standupBoardOpen && standupMeeting);
+  const kanbanImmersive = Boolean(activeKanbanBoard);
   const immersiveOverlayActive =
     monitorImmersive ||
     atmImmersive ||
@@ -4158,6 +4252,17 @@ export function RetroOffice3D({
   }, [activeAtm, activeAtmUid]);
 
   useEffect(() => {
+    if (activeKanbanUid && !activeKanbanBoard) {
+      const timer = window.setTimeout(() => {
+        setActiveKanbanUid(null);
+      }, 0);
+      return () => {
+        window.clearTimeout(timer);
+      };
+    }
+  }, [activeKanbanBoard, activeKanbanUid]);
+
+  useEffect(() => {
     if (activeGithubTerminalUid && !activeGithubTerminal) {
       const timer = window.setTimeout(() => {
         setActiveGithubTerminalUid(null);
@@ -4203,6 +4308,10 @@ export function RetroOffice3D({
     };
     prevAtmUidRef.current = activeAtmUid;
   }, [activeAtm, activeAtmUid]);
+
+  useEffect(() => {
+    prevKanbanUidRef.current = activeKanbanUid;
+  }, [activeKanbanUid]);
 
   useEffect(() => {
     const activeViewKey = activeGithubTerminalUid
@@ -4303,12 +4412,47 @@ export function RetroOffice3D({
     [deskByAgentRef, furniture],
   );
 
+  const openKanbanBoard = useCallback(
+    (item: FurnitureItem | null) => {
+      if (!item || item.type !== "kanban_board") return;
+      if (!taskManagerEnabled) {
+        setActiveKanbanUid(null);
+        onKanbanInteract?.();
+        return;
+      }
+      setFollowAgentId(null);
+      setActiveAtmUid(null);
+      setActiveGithubTerminalUid(null);
+      setActiveQaTerminalUid(null);
+      if (manualSmsBoothOpen) {
+        closeManualSmsBoothView();
+      }
+      if (manualPhoneBoothOpen) {
+        closeManualPhoneBoothView();
+      }
+      onMonitorSelect?.(null);
+      setActiveKanbanUid(item._uid);
+    },
+    [
+      closeManualPhoneBoothView,
+      closeManualSmsBoothView,
+      manualPhoneBoothOpen,
+      manualSmsBoothOpen,
+      onMonitorSelect,
+      onKanbanInteract,
+      taskManagerEnabled,
+    ],
+  );
+
   // E3 Idea 2: click a desk to send its assigned agent to walk and sit there.
   const handleDeskClick = useCallback(
     (uid: string) => {
       if (editMode) return;
       const item = furniture.find((f) => f._uid === uid);
       if (!item) return;
+      if (item.type !== "kanban_board" && activeKanbanUid) {
+        setActiveKanbanUid(null);
+      }
       if (item.type !== "sms_booth" && manualSmsBoothOpen) {
         closeManualSmsBoothView();
       }
@@ -4400,6 +4544,7 @@ export function RetroOffice3D({
       }
       if (item.type === "atm") {
         setFollowAgentId(null);
+        setActiveKanbanUid(null);
         setActiveGithubTerminalUid(null);
         setActiveQaTerminalUid(null);
         onMonitorSelect?.(null);
@@ -4408,6 +4553,7 @@ export function RetroOffice3D({
       }
       if (item.type === "sms_booth") {
         setFollowAgentId(null);
+        setActiveKanbanUid(null);
         setActiveAtmUid(null);
         setActiveGithubTerminalUid(null);
         setActiveQaTerminalUid(null);
@@ -4425,6 +4571,7 @@ export function RetroOffice3D({
       }
       if (item.type === "phone_booth") {
         setFollowAgentId(null);
+        setActiveKanbanUid(null);
         setActiveAtmUid(null);
         setActiveGithubTerminalUid(null);
         setActiveQaTerminalUid(null);
@@ -4446,6 +4593,7 @@ export function RetroOffice3D({
       }
       if (item.type === "server_terminal") {
         setFollowAgentId(null);
+        setActiveKanbanUid(null);
         setActiveAtmUid(null);
         setActiveQaTerminalUid(null);
         onMonitorSelect?.(null);
@@ -4454,6 +4602,7 @@ export function RetroOffice3D({
       }
       if (item.type === "server_rack") {
         setFollowAgentId(null);
+        setActiveKanbanUid(null);
         setActiveAtmUid(null);
         setActiveQaTerminalUid(null);
         onMonitorSelect?.(null);
@@ -4466,12 +4615,17 @@ export function RetroOffice3D({
         item.type === "test_bench"
       ) {
         setFollowAgentId(null);
+        setActiveKanbanUid(null);
         setActiveAtmUid(null);
         setActiveGithubTerminalUid(null);
         onMonitorSelect?.(null);
         setActiveQaTerminalUid(
           item.type === "qa_terminal" ? uid : (qaTerminal?._uid ?? uid),
         );
+        return;
+      }
+      if (item.type === "kanban_board") {
+        openKanbanBoard(item);
         return;
       }
       if (
@@ -4494,6 +4648,7 @@ export function RetroOffice3D({
         return;
       }
       if (item.type !== "desk_cubicle") return;
+      setActiveKanbanUid(null);
       setActiveGithubTerminalUid(null);
       setActiveQaTerminalUid(null);
       setActiveAtmUid(null);
@@ -4517,11 +4672,12 @@ export function RetroOffice3D({
       furniture,
       manualSmsBoothOpen,
       manualPhoneBoothOpen,
+      activeKanbanUid,
+      openKanbanBoard,
       onMonitorSelect,
       onStandupStartRequested,
       planPath,
       qaTerminal,
-      renderAgentsRef,
       renderAgentLookupRef,
       resolveAgentIdForDeskItem,
       serverTerminal,
@@ -4575,6 +4731,7 @@ export function RetroOffice3D({
       hoveredItem?.type === "device_rack" ||
       hoveredItem?.type === "test_bench" ||
       hoveredItem?.type === "server_terminal" ||
+      hoveredItem?.type === "kanban_board" ||
       hoveredMeetingTable
         ? "pointer"
         : "";
@@ -5245,7 +5402,9 @@ export function RetroOffice3D({
                     onPointerDown={handleFurniturePointerDown}
                     onPointerOver={handleFurniturePointerOver}
                     onPointerOut={handleFurniturePointerOut}
-                    onClick={editMode ? handleDeskClick : () => onJukeboxInteract?.()}
+                    onClick={
+                      editMode ? handleDeskClick : () => onJukeboxInteract?.()
+                    }
                   />
                 ) : item.type === "sms_booth" ? (
                   <InteractiveSmsBoothModel
@@ -5502,6 +5661,11 @@ export function RetroOffice3D({
                     isSelected={item._uid === selectedUid}
                     isHovered={item._uid === hoverUid}
                     editMode={editMode}
+                    kanbanTaskCount={
+                      item.type === "kanban_board"
+                        ? kanbanDeskTaskCount
+                        : undefined
+                    }
                     onPointerDown={handleFurniturePointerDown}
                     onPointerOver={handleFurniturePointerOver}
                     onPointerOut={handleFurniturePointerOut}
@@ -5515,7 +5679,7 @@ export function RetroOffice3D({
               <ReadOnlyFurnitureClone furniture={remoteLayoutFurniture} />
             ) : null}
 
-          {/* Removed standalone Jukebox as it's now in the furniture loop */}
+            {/* Removed standalone Jukebox as it's now in the furniture loop */}
 
             {/* Agents — purely imperative, driven by renderAgentsRef inside useFrame. */}
             {sceneAgents.map((agent) => {
@@ -5693,11 +5857,22 @@ export function RetroOffice3D({
                   ? "Gathering in meeting room."
                   : standupMeeting.phase === "in_progress"
                     ? `Speaking: ${standupSpeakerCard?.agentName ?? "Team"}`
-                    : "Standup complete."}
+                    : ""}
               </div>
               <div className="mt-1 font-mono text-[10px] text-white/50">
                 {standupMeeting.arrivedAgentIds.length}/
                 {standupMeeting.participantOrder.length} arrived
+              </div>
+            </button>
+          ) : null}
+          {kanbanBoardItem ? (
+            <button
+              type="button"
+              onClick={() => openKanbanBoard(kanbanBoardItem)}
+              className="rounded-xl border border-cyan-500/22 bg-[#09111a]/90 px-3 py-2 text-left shadow-lg backdrop-blur-sm transition-colors hover:border-cyan-300/40 hover:bg-[#0d1b28]/95"
+            >
+              <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-cyan-200/80">
+                Kanban board
               </div>
             </button>
           ) : null}
@@ -6138,6 +6313,28 @@ export function RetroOffice3D({
         <StandupImmersiveScreen
           meeting={standupMeeting}
           onClose={closeStandupBoard}
+        />
+      ) : null}
+
+      {kanbanImmersive ? (
+        <KanbanImmersiveScreen
+          agents={taskBoardAgents}
+          cardsByStatus={taskBoardCardsByStatus}
+          selectedCard={taskBoardSelectedCard}
+          activeRuns={taskBoardActiveRuns}
+          cronJobs={taskBoardCronJobs}
+          cronLoading={taskBoardCronLoading}
+          cronError={taskBoardCronError}
+          taskCaptureDebug={taskBoardCaptureDebug}
+          onCreateCard={() => onTaskBoardCreateCard?.()}
+          onMoveCard={(cardId, status) => onTaskBoardMoveCard?.(cardId, status)}
+          onSelectCard={(cardId) => onTaskBoardSelectCard?.(cardId)}
+          onUpdateCard={(cardId, patch) =>
+            onTaskBoardUpdateCard?.(cardId, patch)
+          }
+          onDeleteCard={(cardId) => onTaskBoardDeleteCard?.(cardId)}
+          onRefreshCronJobs={() => onTaskBoardRefreshCronJobs?.()}
+          onClose={() => setActiveKanbanUid(null)}
         />
       ) : null}
 

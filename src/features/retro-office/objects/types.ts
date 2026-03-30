@@ -19,6 +19,7 @@ export type InteractiveFurnitureModelProps = {
   isSelected: boolean;
   isHovered: boolean;
   editMode: boolean;
+  kanbanTaskCount?: number;
   doorOpen?: boolean;
   onPointerDown: (uid: string) => void;
   onPointerOver: (uid: string) => void;

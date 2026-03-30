@@ -67,6 +67,7 @@ export const ITEM_FOOTPRINT: Record<string, [number, number]> = {
   server_rack: [45, 90],
   server_terminal: [42, 34],
   qa_terminal: [54, 38],
+  kanban_board: [130, 65],
   device_rack: [70, 36],
   test_bench: [90, 42],
   treadmill: [70, 35],
@@ -149,6 +150,7 @@ export const ITEM_METADATA: Record<string, { blocksNavigation: boolean; navPaddi
   phone_booth:     { blocksNavigation: true  },
   // ── QA lab ────────────────────────────────────────────────────────────────
   qa_terminal:     { blocksNavigation: true  },
+  kanban_board:    { blocksNavigation: true  },
   device_rack:     { blocksNavigation: true  },
   test_bench:      { blocksNavigation: true  },
   // ── gym ───────────────────────────────────────────────────────────────────

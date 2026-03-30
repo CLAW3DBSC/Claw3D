@@ -8,6 +8,7 @@ import type {
   StudioSettingsPublic,
   StudioSettingsPatch,
   StudioStandupPreferencePatch,
+  StudioTaskBoardPreferencePatch,
   StudioVoiceRepliesPreferencePatch,
 } from "@/lib/studio/settings";
 
@@ -28,6 +29,7 @@ type AnalyticsPatch = Record<string, StudioAnalyticsPreferencePatch | null>;
 type VoiceRepliesPatch = Record<string, StudioVoiceRepliesPreferencePatch | null>;
 type OfficePatch = Record<string, StudioOfficePreferencePatch | null>;
 type StandupPatch = Record<string, StudioStandupPreferencePatch | null>;
+type TaskBoardPatch = Record<string, StudioTaskBoardPreferencePatch | null>;
 
 export type StudioSettingsCoordinatorTransport = {
   fetchSettings: () => Promise<StudioSettingsResponse>;
@@ -225,6 +227,34 @@ const mergeStandupPatch = (
   return merged;
 };
 
+const mergeTaskBoardPatch = (
+  current: TaskBoardPatch | undefined,
+  next: TaskBoardPatch | undefined
+): TaskBoardPatch | undefined => {
+  if (!current && !next) return undefined;
+  const merged: TaskBoardPatch = { ...(current ?? {}) };
+  for (const [gatewayKey, value] of Object.entries(next ?? {})) {
+    if (value === null) {
+      merged[gatewayKey] = null;
+      continue;
+    }
+    const existing = merged[gatewayKey];
+    if (existing && existing !== null) {
+      merged[gatewayKey] = {
+        ...existing,
+        ...value,
+        ...(value.cards ? { cards: [...value.cards] } : {}),
+      };
+      continue;
+    }
+    merged[gatewayKey] = {
+      ...value,
+      ...(value.cards ? { cards: [...value.cards] } : {}),
+    };
+  }
+  return merged;
+};
+
 const mergeStudioPatch = (
   current: StudioSettingsPatch | null,
   next: StudioSettingsPatch
@@ -251,6 +281,7 @@ const mergeStudioPatch = (
   const voiceReplies = mergeVoiceRepliesPatch(current.voiceReplies, next.voiceReplies);
   const office = mergeOfficePatch(current.office, next.office);
   const standup = mergeStandupPatch(current.standup, next.standup);
+  const taskBoard = mergeTaskBoardPatch(current.taskBoard, next.taskBoard);
   return {
     ...(next.gateway !== undefined
       ? { gateway: next.gateway }
@@ -264,6 +295,7 @@ const mergeStudioPatch = (
     ...(voiceReplies ? { voiceReplies } : {}),
     ...(office ? { office } : {}),
     ...(standup ? { standup } : {}),
+    ...(taskBoard ? { taskBoard } : {}),
   };
 };
 
