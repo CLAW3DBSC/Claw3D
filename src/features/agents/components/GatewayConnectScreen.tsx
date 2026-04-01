@@ -67,26 +67,15 @@ export const GatewayConnectScreen = ({
   );
   const useDemoPreset = () => {
     onAdapterTypeChange("demo");
-    onGatewayUrlChange("ws://localhost:18789");
-    onTokenChange("");
   };
   const useHermesPreset = () => {
     onAdapterTypeChange("hermes");
-    onGatewayUrlChange("ws://localhost:18789");
-    onTokenChange("");
   };
   const useOpenClawPreset = () => {
     onAdapterTypeChange("openclaw");
-    if (localGatewayDefaults) {
-      onUseLocalDefaults();
-      return;
-    }
-    onGatewayUrlChange("ws://localhost:18789");
   };
   const useCustomPreset = () => {
     onAdapterTypeChange("custom");
-    onGatewayUrlChange("http://localhost:7770");
-    onTokenChange("");
   };
   const statusCopy = useMemo(() => {
     if (status === "connecting" && isLocal) {
@@ -250,6 +239,9 @@ export const GatewayConnectScreen = ({
           </p>
           <p className="mt-2 font-mono text-[11px] text-muted-foreground">
             Selected backend: {selectedAdapterType} | Active backend: {activeAdapterType}
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Each backend keeps its own saved URL and token.
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
             <button

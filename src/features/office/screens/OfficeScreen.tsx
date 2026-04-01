@@ -2351,7 +2351,6 @@ export function OfficeScreen({
   useEffect(() => {
     if (status === "disconnected") {
       connectionEpochRef.current += 1;
-      setAgentsLoaded(false);
       setCreateAgentWizardOpen(false);
       setCreateAgentBusy(false);
       setCreateAgentModalError(null);
@@ -2360,7 +2359,11 @@ export function OfficeScreen({
       loadAgentsInFlightRef.current = null;
       gatewayConfigSnapshot.current = null;
       lastLoadAgentsStartedAtRef.current = 0;
-      hydrateAgents([]);
+      setLoading(false);
+      if (stateRef.current.agents.length === 0) {
+        setAgentsLoaded(false);
+        hydrateAgents([]);
+      }
       setFeedEvents([]);
       setDebugRows([]);
       setRunCountByAgentId({});
@@ -2368,7 +2371,7 @@ export function OfficeScreen({
       prevAssistantPreviewRef.current = {};
       lastGatewayActivityAtRef.current = 0;
     }
-  }, [hydrateAgents, status]);
+  }, [hydrateAgents, setLoading, status]);
 
   useEffect(() => {
     if (!agentsLoaded) return;
@@ -4122,24 +4125,12 @@ export function OfficeScreen({
   // the panel handles the disabled state itself.
 
   if (
+    status !== "connected" &&
     !agentsLoaded &&
     (!connectPromptReady ||
-      (gatewayUrl.trim().length > 0 &&
-        !shouldPromptForConnect &&
-        (!didAttemptGatewayConnect || status === "connecting")))
-  ) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-black font-mono text-[#4FC3F7]">
-        CONNECTING TO GATEWAY...
-      </div>
-    );
-  }
-
-  if (
-    connectPromptReady &&
-    status === "disconnected" &&
-    !agentsLoaded &&
-    (shouldPromptForConnect || didAttemptGatewayConnect)
+      shouldPromptForConnect ||
+      didAttemptGatewayConnect ||
+      status === "connecting")
   ) {
     return (
       <main className="min-h-screen bg-black px-4 py-10">
@@ -4239,7 +4230,15 @@ export function OfficeScreen({
             gatewayUrl,
             settingsCoordinator,
           }}
+          gatewayUrl={gatewayUrl}
+          gatewayToken={token}
+          selectedAdapterType={selectedAdapterType}
+          activeAdapterType={activeAdapterType}
           onGatewayDisconnect={disconnect}
+          onGatewayConnect={() => void connect()}
+          onGatewayUrlChange={setGatewayUrl}
+          onGatewayTokenChange={setToken}
+          onGatewayAdapterTypeChange={setSelectedAdapterType}
           onOpenOnboarding={handleOpenOnboarding}
           feedEvents={feedEvents}
           gatewayStatus={status}

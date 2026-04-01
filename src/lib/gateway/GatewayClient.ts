@@ -7,6 +7,7 @@ import {
   type GatewayHelloOk,
 } from "./openclaw/GatewayBrowserClient";
 import type {
+  StudioGatewayProfilePublic,
   StudioGatewayAdapterType,
   StudioGatewaySettings,
   StudioSettings,
@@ -102,6 +103,29 @@ const parseConnectFailedCloseReason = (
 
 const DEFAULT_UPSTREAM_GATEWAY_URL =
   process.env.NEXT_PUBLIC_GATEWAY_URL || "ws://localhost:18789";
+const DEFAULT_CUSTOM_RUNTIME_URL = "http://localhost:7770";
+
+const isAutoManagedAdapter = (adapterType: StudioGatewayAdapterType) =>
+  adapterType !== "custom";
+
+const resolveDefaultGatewayProfile = (
+  adapterType: StudioGatewayAdapterType,
+  localDefaults: StudioGatewaySettings | null
+): { url: string; token: string } => {
+  switch (adapterType) {
+    case "custom":
+      return { url: DEFAULT_CUSTOM_RUNTIME_URL, token: "" };
+    case "demo":
+    case "hermes":
+      return { url: "ws://localhost:18789", token: "" };
+    case "openclaw":
+    default:
+      return {
+        url: localDefaults?.url || DEFAULT_UPSTREAM_GATEWAY_URL,
+        token: localDefaults?.token ?? "",
+      };
+  }
+};
 
 const normalizeLocalGatewayDefaults = (value: unknown): StudioGatewaySettings | null => {
   if (!value || typeof value !== "object") return null;
@@ -110,6 +134,7 @@ const normalizeLocalGatewayDefaults = (value: unknown): StudioGatewaySettings | 
     token?: unknown;
     tokenConfigured?: unknown;
     adapterType?: unknown;
+    profiles?: unknown;
   };
   const url = typeof raw.url === "string" ? raw.url.trim() : "";
   if (!url) return null;
@@ -125,7 +150,33 @@ const normalizeLocalGatewayDefaults = (value: unknown): StudioGatewaySettings | 
     raw.adapterType === "custom"
       ? raw.adapterType
       : "openclaw";
-  return { url, token, adapterType };
+  const profiles = normalizeGatewayProfilesPublic(raw.profiles);
+  return { url, token, adapterType, ...(profiles ? { profiles } : {}) };
+};
+
+const normalizeGatewayProfilePublic = (
+  value: unknown
+): { url: string; token: string } | null => {
+  if (!value || typeof value !== "object") return null;
+  const raw = value as { url?: unknown };
+  const url = typeof raw.url === "string" ? raw.url.trim() : "";
+  if (!url) return null;
+  return { url, token: "" };
+};
+
+const normalizeGatewayProfilesPublic = (
+  value: unknown
+): Partial<Record<StudioGatewayAdapterType, { url: string; token: string }>> | undefined => {
+  if (!value || typeof value !== "object") return undefined;
+  const raw = value as Partial<Record<StudioGatewayAdapterType, StudioGatewayProfilePublic>>;
+  const profiles: Partial<Record<StudioGatewayAdapterType, { url: string; token: string }>> = {};
+  for (const adapterType of ["openclaw", "hermes", "demo", "custom"] as const) {
+    const profile = normalizeGatewayProfilePublic(raw[adapterType]);
+    if (profile) {
+      profiles[adapterType] = profile;
+    }
+  }
+  return Object.keys(profiles).length > 0 ? profiles : undefined;
 };
 
 type StatusHandler = (status: GatewayStatus) => void;
@@ -561,6 +612,7 @@ export const useGatewayConnection = (
     gatewayUrl: string;
     token: string;
     adapterType: StudioGatewayAdapterType;
+    profiles?: Partial<Record<StudioGatewayAdapterType, { url: string; token: string }>>;
   } | null>(null);
   const retryAttemptRef = useRef(0);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -568,8 +620,11 @@ export const useGatewayConnection = (
 
   const [gatewayUrl, setGatewayUrl] = useState(DEFAULT_UPSTREAM_GATEWAY_URL);
   const [token, setToken] = useState("");
-  const [selectedAdapterType, setSelectedAdapterType] =
+  const [selectedAdapterType, setSelectedAdapterTypeState] =
     useState<StudioGatewayAdapterType>("openclaw");
+  const [adapterProfiles, setAdapterProfiles] = useState<
+    Partial<Record<StudioGatewayAdapterType, { url: string; token: string }>>
+  >({});
   const [detectedAdapterType, setDetectedAdapterType] =
     useState<StudioGatewayAdapterType | null>(null);
   const [localGatewayDefaults, setLocalGatewayDefaults] = useState<StudioGatewaySettings | null>(
@@ -579,6 +634,18 @@ export const useGatewayConnection = (
   const [error, setError] = useState<string | null>(null);
   const [connectErrorCode, setConnectErrorCode] = useState<string | null>(null);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const setSelectedAdapterType = useCallback(
+    (value: StudioGatewayAdapterType) => {
+      setSelectedAdapterTypeState(value);
+      const profile =
+        adapterProfiles[value] ?? resolveDefaultGatewayProfile(value, localGatewayDefaults);
+      setGatewayUrl(profile.url);
+      setToken(profile.token);
+      setError(null);
+      setConnectErrorCode(null);
+    },
+    [adapterProfiles, localGatewayDefaults]
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -604,12 +671,6 @@ export const useGatewayConnection = (
         const resolvedUrl = hasSavedUrl
           ? gateway!.url
           : normalizedDefaults?.url || DEFAULT_UPSTREAM_GATEWAY_URL;
-        const nextGatewayUrl = resolvedUrl;
-        const nextToken = hasSavedUrl
-          ? (gateway && "token" in gateway && typeof gateway.token === "string"
-              ? gateway.token
-              : "")
-          : normalizedDefaults?.token ?? "";
         const nextAdapterType =
           hasSavedUrl && gateway && "adapterType" in gateway && typeof gateway.adapterType === "string"
             ? ((gateway.adapterType === "demo" ||
@@ -619,14 +680,41 @@ export const useGatewayConnection = (
                 ? gateway.adapterType
                 : "openclaw") as StudioGatewayAdapterType)
             : normalizedDefaults?.adapterType ?? "openclaw";
+        const baseProfiles = {
+          ...(gateway?.profiles
+            ? normalizeGatewayProfilesPublic(gateway.profiles)
+            : undefined),
+          ...(normalizedDefaults?.profiles ?? {}),
+        };
+        const mergedProfiles = {
+          ...baseProfiles,
+          ...(hasSavedUrl
+            ? {
+                [nextAdapterType]: {
+                  url: resolvedUrl,
+                  token:
+                    gateway && "token" in gateway && typeof gateway.token === "string"
+                      ? gateway.token
+                      : "",
+                },
+              }
+            : {}),
+        };
+        const selectedProfile =
+          mergedProfiles[nextAdapterType] ??
+          resolveDefaultGatewayProfile(nextAdapterType, normalizedDefaults);
+        const nextGatewayUrl = selectedProfile.url;
+        const nextToken = selectedProfile.token;
         loadedGatewaySettings.current = {
           gatewayUrl: nextGatewayUrl.trim(),
           token: nextToken,
           adapterType: nextAdapterType,
+          profiles: mergedProfiles,
         };
         setGatewayUrl(nextGatewayUrl);
         setToken(nextToken);
-        setSelectedAdapterType(nextAdapterType);
+        setSelectedAdapterTypeState(nextAdapterType);
+        setAdapterProfiles(mergedProfiles);
       } catch (err) {
         if (!cancelled) {
           const message = err instanceof Error ? err.message : "Failed to load gateway settings.";
@@ -639,6 +727,7 @@ export const useGatewayConnection = (
               gatewayUrl: DEFAULT_UPSTREAM_GATEWAY_URL.trim(),
               token: "",
               adapterType: "openclaw",
+              profiles: undefined,
             };
           }
           setSettingsLoaded(true);
@@ -703,6 +792,7 @@ export const useGatewayConnection = (
         token,
         authScopeKey: gatewayUrl,
         clientName: "openclaw-control-ui",
+        disableDeviceAuth: selectedAdapterType !== "openclaw",
       });
       await ensureGatewayReloadModeHotForLocalStudio({
         client,
@@ -728,7 +818,7 @@ export const useGatewayConnection = (
     if (didAutoConnect.current) return;
     if (!settingsLoaded) return;
     if (!gatewayUrl.trim()) return;
-    if (selectedAdapterType === "custom") return;
+    if (!isAutoManagedAdapter(selectedAdapterType)) return;
     didAutoConnect.current = true;
     void connect();
   }, [connect, gatewayUrl, selectedAdapterType, settingsLoaded]);
@@ -746,6 +836,7 @@ export const useGatewayConnection = (
       connectErrorCode,
       attempt,
     });
+    if (!isAutoManagedAdapter(selectedAdapterType)) return;
     if (delay === null) return;
     retryTimerRef.current = setTimeout(() => {
       retryAttemptRef.current = attempt + 1;
@@ -758,7 +849,7 @@ export const useGatewayConnection = (
         retryTimerRef.current = null;
       }
     };
-  }, [connect, connectErrorCode, error, gatewayUrl, status]);
+  }, [connect, connectErrorCode, error, gatewayUrl, selectedAdapterType, status]);
 
   // Reset retry count on successful connection
   useEffect(() => {
@@ -770,13 +861,43 @@ export const useGatewayConnection = (
 
   useEffect(() => {
     if (!settingsLoaded) return;
+    setAdapterProfiles((current) => {
+      const nextProfile = {
+        url: gatewayUrl.trim(),
+        token,
+      };
+      const existing = current[selectedAdapterType];
+      if (
+        existing &&
+        existing.url === nextProfile.url &&
+        existing.token === nextProfile.token
+      ) {
+        return current;
+      }
+      return {
+        ...current,
+        [selectedAdapterType]: nextProfile,
+      };
+    });
+  }, [gatewayUrl, selectedAdapterType, settingsLoaded, token]);
+
+  useEffect(() => {
+    if (!settingsLoaded) return;
     const baseline = loadedGatewaySettings.current;
     if (!baseline) return;
     const nextGatewayUrl = gatewayUrl.trim();
+    const nextProfiles = {
+      ...adapterProfiles,
+      [selectedAdapterType]: {
+        url: nextGatewayUrl,
+        token,
+      },
+    };
     if (
       nextGatewayUrl === baseline.gatewayUrl &&
       token === baseline.token &&
-      selectedAdapterType === baseline.adapterType
+      selectedAdapterType === baseline.adapterType &&
+      JSON.stringify(nextProfiles) === JSON.stringify(baseline.profiles ?? {})
     ) {
       return;
     }
@@ -786,11 +907,12 @@ export const useGatewayConnection = (
           url: nextGatewayUrl,
           token,
           adapterType: selectedAdapterType,
+          profiles: nextProfiles,
         },
       },
       400
     );
-  }, [gatewayUrl, selectedAdapterType, settingsCoordinator, settingsLoaded, token]);
+  }, [adapterProfiles, gatewayUrl, selectedAdapterType, settingsCoordinator, settingsLoaded, token]);
 
   const useLocalGatewayDefaults = useCallback(() => {
     if (!localGatewayDefaults) {
@@ -798,7 +920,14 @@ export const useGatewayConnection = (
     }
     setGatewayUrl(localGatewayDefaults.url);
     setToken(localGatewayDefaults.token);
-    setSelectedAdapterType(localGatewayDefaults.adapterType);
+    setAdapterProfiles((current) => ({
+      ...current,
+      [localGatewayDefaults.adapterType]: {
+        url: localGatewayDefaults.url,
+        token: localGatewayDefaults.token,
+      },
+    }));
+    setSelectedAdapterTypeState(localGatewayDefaults.adapterType);
     setError(null);
     setConnectErrorCode(null);
   }, [localGatewayDefaults]);
