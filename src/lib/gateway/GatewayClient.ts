@@ -118,7 +118,10 @@ const normalizeLocalGatewayDefaults = (value: unknown): StudioGatewaySettings | 
   // client — leave it empty so the connection dialog can prompt if needed.
   const token = typeof raw.token === "string" ? raw.token.trim() : "";
   const adapterType =
-    raw.adapterType === "demo" || raw.adapterType === "hermes" || raw.adapterType === "openclaw"
+    raw.adapterType === "demo" ||
+    raw.adapterType === "hermes" ||
+    raw.adapterType === "openclaw" ||
+    raw.adapterType === "custom"
       ? raw.adapterType
       : "openclaw";
   return { url, token, adapterType };
@@ -610,7 +613,8 @@ export const useGatewayConnection = (
           hasSavedUrl && gateway && "adapterType" in gateway && typeof gateway.adapterType === "string"
             ? ((gateway.adapterType === "demo" ||
                 gateway.adapterType === "hermes" ||
-                gateway.adapterType === "openclaw"
+                gateway.adapterType === "openclaw" ||
+                gateway.adapterType === "custom"
                 ? gateway.adapterType
                 : "openclaw") as StudioGatewayAdapterType)
             : normalizedDefaults?.adapterType ?? "openclaw";
@@ -674,6 +678,13 @@ export const useGatewayConnection = (
     setError(null);
     setConnectErrorCode(null);
     wasManualDisconnectRef.current = false;
+    if (selectedAdapterType === "custom") {
+      setConnectErrorCode("studio.custom_runtime_unimplemented");
+      setError(
+        "Custom backend selection is scaffolded, but direct HTTP runtime flows are not wired into Studio yet. Keep using OpenClaw or Hermes here until the custom runtime client lands."
+      );
+      return;
+    }
     try {
       await settingsCoordinator.flushPending();
       await client.connect({
@@ -690,7 +701,8 @@ export const useGatewayConnection = (
       const nextDetectedAdapterType =
         hello?.adapterType === "demo" ||
         hello?.adapterType === "hermes" ||
-        hello?.adapterType === "openclaw"
+        hello?.adapterType === "openclaw" ||
+        hello?.adapterType === "custom"
           ? hello.adapterType
           : "openclaw";
       setDetectedAdapterType(nextDetectedAdapterType);
@@ -699,15 +711,16 @@ export const useGatewayConnection = (
       setConnectErrorCode(err instanceof GatewayResponseError ? err.code : null);
       setError(formatGatewayError(err));
     }
-  }, [client, gatewayUrl, settingsCoordinator, token]);
+  }, [client, gatewayUrl, selectedAdapterType, settingsCoordinator, token]);
 
   useEffect(() => {
     if (didAutoConnect.current) return;
     if (!settingsLoaded) return;
     if (!gatewayUrl.trim()) return;
+    if (selectedAdapterType === "custom") return;
     didAutoConnect.current = true;
     void connect();
-  }, [connect, gatewayUrl, settingsLoaded]);
+  }, [connect, gatewayUrl, selectedAdapterType, settingsLoaded]);
 
   // Auto-retry on disconnect (gateway busy, network blip, etc.)
   useEffect(() => {
@@ -798,7 +811,10 @@ export const useGatewayConnection = (
   const shouldPromptForConnect =
     settingsLoaded &&
     status !== "connected" &&
-    (!gatewayUrl.trim() || !token.trim() || wasManualDisconnectRef.current || Boolean(error));
+    (!gatewayUrl.trim() ||
+      (selectedAdapterType === "openclaw" && !token.trim()) ||
+      wasManualDisconnectRef.current ||
+      Boolean(error));
 
   return {
     client,

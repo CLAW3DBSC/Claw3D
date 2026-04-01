@@ -21,7 +21,7 @@ export type StudioGatewaySettings = {
   adapterType: StudioGatewayAdapterType;
 };
 
-export type StudioGatewayAdapterType = "openclaw" | "hermes" | "demo";
+export type StudioGatewayAdapterType = "openclaw" | "hermes" | "demo" | "custom";
 
 export type StudioGatewaySettingsPublic = {
   url: string;
@@ -675,7 +675,12 @@ const normalizeGatewayAdapterType = (
   fallback: StudioGatewayAdapterType = "openclaw"
 ): StudioGatewayAdapterType => {
   const adapterType = coerceString(value).toLowerCase();
-  if (adapterType === "demo" || adapterType === "hermes" || adapterType === "openclaw") {
+  if (
+    adapterType === "demo" ||
+    adapterType === "hermes" ||
+    adapterType === "openclaw" ||
+    adapterType === "custom"
+  ) {
     return adapterType;
   }
   return fallback;
