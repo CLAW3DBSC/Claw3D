@@ -16,6 +16,25 @@ The shape should be:
 - the external runtime stays implementation-specific
 - Claw3D core remains generic
 
+## Current Implementation Notes
+
+The current `custom` branch path is deliberately conservative.
+
+What exists today:
+
+- provider selection and metadata flow through the Studio runtime seam
+- same-origin runtime proxying through `/api/runtime/custom`
+- health, state, and registry probing
+- direct chat via `/v1/chat/completions`
+- office/bootstrap/chat/model loading routed through the provider layer
+
+What still needs to mature:
+
+- true provider-native streaming
+- stronger multi-session persistence semantics
+- integration tests against a live custom runtime
+- richer office presentation of runtime metadata, lanes, and model identity
+
 ## Position
 
 A custom runtime should sit at the Claw3D boundary as an orchestrator-backed service.

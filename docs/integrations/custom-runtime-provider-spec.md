@@ -17,6 +17,29 @@ The idea is:
 - upstream concept: `custom` provider
 - downstream implementations provide their own runtime behavior against that seam
 
+## Current Branch Status
+
+On `dev/vera_lane`, the `custom` provider is no longer just a design
+placeholder.
+
+Current implemented behavior:
+
+- `custom` is a first-class provider ID in the runtime seam
+- Studio persists the selected backend mode as `custom`
+- the provider exposes runtime metadata such as `runtimeName`, `vendor`,
+  `runtimeVersion`, and `routeProfile` when available
+- Claw3D probes `GET /health`, `GET /state`, and `GET /registry`
+- chat uses a direct HTTP path to `POST /v1/chat/completions`
+- browser traffic is proxied through Claw3D's same-origin
+  `/api/runtime/custom` route instead of calling the runtime directly
+
+Still intentionally missing in this branch:
+
+- normalized streaming event support
+- richer session persistence beyond the synthetic provider session layer
+- direct approvals/files/cron surfaces
+- process auto-launch from Studio
+
 ## Why This Matters
 
 Not every useful runtime should have to become a named built-in provider in upstream Claw3D.
