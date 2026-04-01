@@ -198,43 +198,54 @@ function SoccerPlayer({
   facing?: number;
   goalkeeper?: boolean;
 }) {
-  const jerseyColor = goalkeeper ? teamColor : teamColor;
+  const jerseyColor = goalkeeper ? "#f8fafc" : teamColor;
+  const shortColor = goalkeeper ? teamColor : "#f8fafc";
+  const sockColor = goalkeeper ? "#111827" : teamColor;
   return (
-    <group position={position} rotation={[0, facing, 0]} scale={0.52}>
-      <mesh position={[0, 0.06, 0.018]} castShadow>
-        <sphereGeometry args={[0.052, 14, 14]} />
+    <group position={position} rotation={[0, facing, 0]} scale={0.9}>
+      <mesh position={[0, 0.1, 0.028]} castShadow>
+        <sphereGeometry args={[0.078, 14, 14]} />
         <meshStandardMaterial color="#f1c7a6" roughness={0.9} metalness={0.02} />
       </mesh>
-      <mesh position={[0, -0.05, 0]} castShadow receiveShadow>
-        <capsuleGeometry args={[0.052, 0.18, 4, 10]} />
-        <meshStandardMaterial color={jerseyColor} roughness={0.72} metalness={0.08} />
+      <mesh position={[0, -0.035, 0]} castShadow receiveShadow>
+        <capsuleGeometry args={[0.085, 0.24, 4, 10]} />
+        <meshStandardMaterial color={jerseyColor} roughness={0.68} metalness={0.08} />
       </mesh>
-      <mesh position={[0, -0.17, 0.01]} castShadow receiveShadow>
-        <boxGeometry args={[0.14, 0.08, 0.08]} />
-        <meshStandardMaterial color="#f5f7fa" roughness={0.88} metalness={0.02} />
+      <mesh position={[0, -0.19, 0.01]} castShadow receiveShadow>
+        <boxGeometry args={[0.21, 0.11, 0.1]} />
+        <meshStandardMaterial color={shortColor} roughness={0.84} metalness={0.02} />
       </mesh>
-      {([-0.038, 0.038] as const).map((x) => (
-        <mesh key={`leg-${x}`} position={[x, -0.26, 0.008]} castShadow>
-          <cylinderGeometry args={[0.016, 0.018, 0.12, 10]} />
-          <meshStandardMaterial color="#111827" roughness={0.94} metalness={0.02} />
+      <mesh position={[0, -0.04, 0.085]} castShadow>
+        <boxGeometry args={[0.18, 0.05, 0.04]} />
+        <meshStandardMaterial color="#0f172a" roughness={0.78} metalness={0.08} />
+      </mesh>
+      {([-0.055, 0.055] as const).map((x) => (
+        <mesh key={`leg-${x}`} position={[x, -0.315, 0.008]} castShadow>
+          <cylinderGeometry args={[0.026, 0.028, 0.2, 10]} />
+          <meshStandardMaterial color={sockColor} roughness={0.94} metalness={0.02} />
         </mesh>
       ))}
-      {([-0.058, 0.058] as const).map((x) => (
-        <mesh key={`foot-${x}`} position={[x, -0.325, 0.03]} castShadow receiveShadow>
-          <boxGeometry args={[0.05, 0.025, 0.085]} />
+      {([-0.082, 0.082] as const).map((x) => (
+        <mesh key={`foot-${x}`} position={[x, -0.43, 0.055]} castShadow receiveShadow>
+          <boxGeometry args={[0.075, 0.034, 0.12]} />
           <meshStandardMaterial color="#101214" roughness={0.9} metalness={0.02} />
         </mesh>
       ))}
-      {([-0.088, 0.088] as const).map((x) => (
-        <mesh key={`arm-${x}`} position={[x, -0.055, 0]} rotation={[0, 0, x < 0 ? 0.45 : -0.45]} castShadow>
-          <capsuleGeometry args={[0.013, 0.11, 4, 8]} />
+      {([-0.13, 0.13] as const).map((x) => (
+        <mesh
+          key={`arm-${x}`}
+          position={[x, -0.03, 0]}
+          rotation={[0, 0, x < 0 ? 0.7 : -0.7]}
+          castShadow
+        >
+          <capsuleGeometry args={[0.018, 0.16, 4, 8]} />
           <meshStandardMaterial color="#f1c7a6" roughness={0.9} metalness={0.02} />
         </mesh>
       ))}
       {goalkeeper ? (
-        <mesh position={[0, -0.02, -0.05]} castShadow>
-          <boxGeometry args={[0.22, 0.03, 0.06]} />
-          <meshStandardMaterial color="#f8fafc" roughness={0.72} metalness={0.04} />
+        <mesh position={[0, -0.01, -0.09]} castShadow>
+          <boxGeometry args={[0.32, 0.045, 0.08]} />
+          <meshStandardMaterial color={teamColor} roughness={0.72} metalness={0.04} />
         </mesh>
       ) : null}
     </group>
