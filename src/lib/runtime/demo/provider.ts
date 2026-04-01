@@ -16,8 +16,6 @@ const DEMO_RUNTIME_CAPABILITIES: ReadonlySet<RuntimeCapability> = new Set([
   "approvals",
   "config",
   "models",
-  "skills",
-  "cron",
   "files",
   "agent-roles",
 ]);

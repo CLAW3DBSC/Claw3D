@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { AgentState } from "@/features/agents/state/store";
 import type { AgentEventPayload } from "@/features/agents/state/runtimeEventBridge";
 import type { GatewayClient, GatewayStatus } from "@/lib/gateway/GatewayClient";
@@ -69,7 +69,7 @@ export const useRunLog = ({
 }) => {
   const [records, setRecords] = useState<RunRecord[]>([]);
   const agentsRef = useRef(agents);
-  const visibleRecords = enabled ? records : [];
+  const visibleRecords = useMemo(() => (enabled ? records : []), [enabled, records]);
 
   useEffect(() => {
     agentsRef.current = agents;
