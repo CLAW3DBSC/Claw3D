@@ -115,9 +115,22 @@ const parseConnectFailedCloseReason = (
 const DEFAULT_UPSTREAM_GATEWAY_URL =
   process.env.NEXT_PUBLIC_GATEWAY_URL || "ws://localhost:18789";
 const DEFAULT_CUSTOM_RUNTIME_URL = "http://localhost:7770";
+const INITIAL_AUTO_CONNECT_DELAY_MS = 900;
 
 const isAutoManagedAdapter = (adapterType: StudioGatewayAdapterType) =>
   adapterType !== "custom";
+
+export const resolveInitialGatewayAutoConnectDelayMs = (
+  adapterType: StudioGatewayAdapterType
+): number => {
+  switch (adapterType) {
+    case "hermes":
+    case "demo":
+      return INITIAL_AUTO_CONNECT_DELAY_MS;
+    default:
+      return 0;
+  }
+};
 
 const resolveDefaultGatewayProfile = (
   adapterType: StudioGatewayAdapterType,
@@ -850,11 +863,18 @@ export const useGatewayConnection = (
     if (!gatewayUrl.trim()) return;
     if (!isAutoManagedAdapter(selectedAdapterType)) return;
     didAutoConnect.current = true;
+    const delayMs = resolveInitialGatewayAutoConnectDelayMs(selectedAdapterType);
     gatewayDebugLog("auto-connect", {
       selectedAdapterType,
       gatewayUrl,
+      delayMs,
     });
-    void connect();
+    const timeoutId = window.setTimeout(() => {
+      void connect();
+    }, delayMs);
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
   }, [connect, gatewayUrl, selectedAdapterType, settingsLoaded]);
 
   // Auto-retry on disconnect (gateway busy, network blip, etc.)

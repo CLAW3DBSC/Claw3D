@@ -157,10 +157,18 @@ describe("useGatewayConnection", () => {
     render(createElement(Probe));
 
     await waitFor(() => {
-      expect(captured.url).toBe("ws://127.0.0.1:3000/api/gateway/ws");
+      expect(captured.url).toBe("ws://localhost:3000/api/gateway/ws");
     });
     expect(captured.token).toBe("");
     expect(captured.authScopeKey).toBe("ws://localhost:18789");
+  });
+
+  it("uses_a_small_initial_auto_connect_delay_for_hermes_and_demo_only", async () => {
+    const mod = await import("@/lib/gateway/GatewayClient");
+    expect(mod.resolveInitialGatewayAutoConnectDelayMs("openclaw")).toBe(0);
+    expect(mod.resolveInitialGatewayAutoConnectDelayMs("custom")).toBe(0);
+    expect(mod.resolveInitialGatewayAutoConnectDelayMs("hermes")).toBe(900);
+    expect(mod.resolveInitialGatewayAutoConnectDelayMs("demo")).toBe(900);
   });
 
   it("auto_applies_runtime_local_defaults_when_no_saved_gateway_and_build_time_empty", async () => {
