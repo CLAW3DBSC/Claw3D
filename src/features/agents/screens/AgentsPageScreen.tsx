@@ -109,6 +109,7 @@ import {
 import { useAgentSettingsMutationController } from "@/features/agents/operations/useAgentSettingsMutationController";
 import { useRuntimeSyncController } from "@/features/agents/operations/useRuntimeSyncController";
 import { useChatInteractionController } from "@/features/agents/operations/useChatInteractionController";
+import { resolveSettingsSidebarEntries } from "@/features/agents/operations/settingsSidebarTabs";
 import {
   SETTINGS_ROUTE_AGENT_ID_QUERY_PARAM,
   parseSettingsRouteAgentIdFromQueryParam,
@@ -449,6 +450,10 @@ const AgentsPageScreen = () => {
   const settingsHeaderThinking =
     settingsHeaderThinkingRaw.charAt(0).toUpperCase() + settingsHeaderThinkingRaw.slice(1);
   const activeSettingsSidebarItem: SettingsSidebarItem = settingsSidebarItem;
+  const settingsSidebarEntries = useMemo(
+    () => resolveSettingsSidebarEntries(runtimeSupportsCron),
+    [runtimeSupportsCron]
+  );
 
   useEffect(() => {
     const selector = 'link[data-agent-favicon="true"]';
@@ -572,6 +577,7 @@ const AgentsPageScreen = () => {
   const settingsMutationController = useAgentSettingsMutationController({
     client,
     status,
+    runtimeSupportsCron,
     isLocalGateway,
     agents,
     hasCreateBlock: Boolean(createAgentBlock),
@@ -1529,16 +1535,7 @@ const AgentsPageScreen = () => {
                   </button>
                 </div>
                 <nav className="py-3">
-                  {(
-                    [
-                      { id: "personality", label: "Behavior" },
-                      { id: "capabilities", label: "Capabilities" },
-                      { id: "skills", label: "Skills" },
-                      { id: "system", label: "System setup" },
-                      { id: "automations", label: "Automations" },
-                      { id: "advanced", label: "Advanced" },
-                    ] as const
-                  ).map((entry) => {
+                  {settingsSidebarEntries.map((entry) => {
                     const active = activeSettingsSidebarItem === entry.id;
                     return (
                       <button
