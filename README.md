@@ -1,4 +1,6 @@
 # Claw3D
+<img width="680" height="340" alt="e5d6a9497b07b8b6d1eae5fb99c6dc30" src="https://github.com/user-attachments/assets/e6483af0-14a4-43ff-822d-a823451cc7ea" />
+
 
 A 3D workspace for AI agents.
 
