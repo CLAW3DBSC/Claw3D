@@ -23,7 +23,11 @@ export const resolveStudioSettingsPath = () =>
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value && typeof value === "object");
 
-const readOpenclawGatewayDefaults = (): { url: string; token: string } | null => {
+const readOpenclawGatewayDefaults = (): {
+  url: string;
+  token: string;
+  adapterType: "openclaw";
+} | null => {
   try {
     const configPath = path.join(resolveStateDir(), OPENCLAW_CONFIG_FILENAME);
     if (!fs.existsSync(configPath)) return null;
@@ -38,20 +42,24 @@ const readOpenclawGatewayDefaults = (): { url: string; token: string } | null =>
     if (!token) return null;
     const url = port ? `ws://localhost:${port}` : "";
     if (!url) return null;
-    return { url, token };
+    return { url, token, adapterType: "openclaw" };
   } catch {
     return null;
   }
 };
 
-export const loadLocalGatewayDefaults = (): { url: string; token: string } | null => {
+export const loadLocalGatewayDefaults = (): {
+  url: string;
+  token: string;
+  adapterType: "openclaw";
+} | null => {
   const fromFile = readOpenclawGatewayDefaults();
   if (fromFile) return fromFile;
   // Fall back to env vars so operators can configure the gateway URL at
   // runtime without openclaw.json and without a rebuild.
   const envUrl = process.env.CLAW3D_GATEWAY_URL?.trim();
   const envToken = process.env.CLAW3D_GATEWAY_TOKEN?.trim();
-  if (envUrl) return { url: envUrl, token: envToken ?? "" };
+  if (envUrl) return { url: envUrl, token: envToken ?? "", adapterType: "openclaw" };
   return null;
 };
 
@@ -71,7 +79,11 @@ export const loadStudioSettings = (): StudioSettings => {
       return {
         ...settings,
         gateway: settings.gateway?.url?.trim()
-          ? { url: settings.gateway.url.trim(), token: gateway.token }
+          ? {
+              url: settings.gateway.url.trim(),
+              token: gateway.token,
+              adapterType: settings.gateway.adapterType,
+            }
           : gateway,
       };
     }
