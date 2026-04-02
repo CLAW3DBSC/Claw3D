@@ -145,6 +145,30 @@ describe("useGatewayConnection", () => {
     const { useGatewayConnection, captured } = await setupAndImportHook(null);
     const coordinator = {
       loadSettings: async () => null,
+      loadSettingsEnvelope: async () => ({
+        settings: {
+          version: 1,
+          gateway: {
+            url: "ws://localhost:18789",
+            token: "",
+            adapterType: "hermes",
+            lastKnownGood: {
+              url: "ws://localhost:18789",
+              token: "",
+              adapterType: "hermes",
+            },
+          },
+          focused: {},
+          avatars: {},
+          analytics: {},
+          voiceReplies: {},
+          office: {},
+          deskAssignments: {},
+          standup: {},
+          taskBoard: {},
+        },
+        localGatewayDefaults: null,
+      }),
       schedulePatch: () => {},
       flushPending: async () => {},
     };
@@ -163,12 +187,71 @@ describe("useGatewayConnection", () => {
     expect(captured.authScopeKey).toBe("ws://localhost:18789");
   });
 
+  it("does_not_auto_connect_without_a_last_known_good_state", async () => {
+    const { useGatewayConnection, captured } = await setupAndImportHook(null);
+    const coordinator = {
+      loadSettingsEnvelope: async () => ({
+        settings: {
+          version: 1,
+          gateway: {
+            url: "ws://localhost:18789",
+            token: "",
+            adapterType: "hermes",
+          },
+          focused: {},
+          avatars: {},
+          analytics: {},
+          voiceReplies: {},
+          office: {},
+          deskAssignments: {},
+          standup: {},
+          taskBoard: {},
+        },
+        localGatewayDefaults: null,
+      }),
+      loadSettings: async () => null,
+      schedulePatch: () => {},
+      flushPending: async () => {},
+    };
+
+    const Probe = () => {
+      const state = useGatewayConnection(coordinator);
+      return createElement(
+        "div",
+        null,
+        createElement("div", { "data-testid": "gatewayUrl" }, state.gatewayUrl),
+        createElement(
+          "div",
+          { "data-testid": "shouldPromptForConnect" },
+          state.shouldPromptForConnect ? "yes" : "no"
+        )
+      );
+    };
+
+    render(createElement(Probe));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("gatewayUrl")).toHaveTextContent("ws://localhost:18789");
+    });
+    expect(screen.getByTestId("shouldPromptForConnect")).toHaveTextContent("yes");
+    expect(captured.url).toBeNull();
+  });
+
   it("uses_a_small_initial_auto_connect_delay_for_hermes_and_demo_only", async () => {
     const mod = await import("@/lib/gateway/GatewayClient");
     expect(mod.resolveInitialGatewayAutoConnectDelayMs("openclaw")).toBe(0);
     expect(mod.resolveInitialGatewayAutoConnectDelayMs("custom")).toBe(0);
     expect(mod.resolveInitialGatewayAutoConnectDelayMs("hermes")).toBe(900);
     expect(mod.resolveInitialGatewayAutoConnectDelayMs("demo")).toBe(900);
+  });
+
+  it("retries_only_the_first_connect_for_hermes_and_demo", async () => {
+    const mod = await import("@/lib/gateway/GatewayClient");
+    expect(mod.resolveInitialGatewayConnectAttemptCount("openclaw", false)).toBe(1);
+    expect(mod.resolveInitialGatewayConnectAttemptCount("custom", false)).toBe(1);
+    expect(mod.resolveInitialGatewayConnectAttemptCount("hermes", false)).toBe(2);
+    expect(mod.resolveInitialGatewayConnectAttemptCount("demo", false)).toBe(2);
+    expect(mod.resolveInitialGatewayConnectAttemptCount("hermes", true)).toBe(1);
   });
 
   it("auto_applies_runtime_local_defaults_when_no_saved_gateway_and_build_time_empty", async () => {
@@ -388,7 +471,7 @@ describe("useGatewayConnection", () => {
     });
     expect(screen.getByTestId("selectedAdapterType")).toHaveTextContent("custom");
     expect(screen.getByTestId("activeAdapterType")).toHaveTextContent("custom");
-    expect(screen.getByTestId("shouldPromptForConnect")).toHaveTextContent("no");
+    expect(screen.getByTestId("shouldPromptForConnect")).toHaveTextContent("yes");
   });
 
   it("restores_backend_specific_profiles_when_switching_adapter_type", async () => {

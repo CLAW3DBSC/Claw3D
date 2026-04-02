@@ -12,6 +12,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { MessageSquare, ChevronDown, Mic } from "lucide-react";
 import { RetroOffice3D } from "@/features/retro-office/RetroOffice3D";
 import type { OfficeAgent } from "@/features/retro-office/core/types";
+import { RunningAvatarLoader } from "@/features/agents/components/RunningAvatarLoader";
 import { GatewayConnectScreen } from "@/features/agents/components/GatewayConnectScreen";
 import { useAgentStore, type AgentState } from "@/features/agents/state/store";
 import {
@@ -4158,27 +4159,40 @@ export function OfficeScreen({
   return (
     <main className="relative h-full w-full overflow-hidden bg-black">
       {showGatewayLoadingOverlay ? (
-        <div className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center bg-black/55 font-mono text-[#4FC3F7] backdrop-blur-[1px]">
-          CONNECTING TO GATEWAY...
+        <div
+          className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center bg-[#120a05]/76"
+          aria-label="Connecting to runtime"
+          role="status"
+        >
+          <div className="rounded-xl border border-amber-700/45 bg-[#1a1008] px-8 py-6 shadow-2xl">
+            <RunningAvatarLoader
+              size={28}
+              trackWidth={76}
+              label="Connecting to your runtime..."
+              labelClassName="text-amber-100/80"
+            />
+          </div>
         </div>
       ) : null}
       {showGatewayConnectOverlay ? (
-        <div className="pointer-events-auto absolute inset-0 z-50 flex items-start justify-center bg-black/60 px-4 py-10 backdrop-blur-sm">
-          <GatewayConnectScreen
-            gatewayUrl={gatewayUrl}
-            token={token}
-            selectedAdapterType={selectedAdapterType}
-            activeAdapterType={activeAdapterType}
-            localGatewayDefaults={localGatewayDefaults}
-            status={status}
-            error={gatewayError}
-            showApprovalHint={didAttemptGatewayConnect}
-            onGatewayUrlChange={setGatewayUrl}
-            onTokenChange={setToken}
-            onAdapterTypeChange={setSelectedAdapterType}
-            onUseLocalDefaults={useLocalGatewayDefaults}
-            onConnect={() => void connect()}
-          />
+        <div className="pointer-events-auto absolute inset-0 z-50 flex items-start justify-center bg-[#120a05]/76 px-4 py-10">
+          <div className="w-full max-w-[860px] rounded-2xl border border-amber-900/55 bg-[#120a05]/98 p-3 shadow-2xl">
+            <GatewayConnectScreen
+              gatewayUrl={gatewayUrl}
+              token={token}
+              selectedAdapterType={selectedAdapterType}
+              activeAdapterType={activeAdapterType}
+              localGatewayDefaults={localGatewayDefaults}
+              status={status}
+              error={gatewayError}
+              showApprovalHint={didAttemptGatewayConnect}
+              onGatewayUrlChange={setGatewayUrl}
+              onTokenChange={setToken}
+              onAdapterTypeChange={setSelectedAdapterType}
+              onUseLocalDefaults={useLocalGatewayDefaults}
+              onConnect={() => void connect()}
+            />
+          </div>
         </div>
       ) : null}
       <section className="relative h-full min-h-0 min-w-0 overflow-hidden">

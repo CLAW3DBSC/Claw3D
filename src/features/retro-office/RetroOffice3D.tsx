@@ -5229,11 +5229,6 @@ export function RetroOffice3D({
     cameraPresetRef.current = overviewPreset;
   }, [officeCenterSignal, overviewPreset]);
 
-  useEffect(() => {
-    cameraPresetRef.current = overviewPreset;
-    orbitRef.current?.reset?.();
-  }, [overviewPreset, gatewayStatus, agents.length]);
-
   return (
     <div className="relative w-full h-full bg-[#1a1008] font-mono text-white overflow-hidden">
       {/* 3D Canvas — fills everything. */}
