@@ -89,6 +89,33 @@ Prerequisite:
 - For a no-framework local office demo, run the bundled demo gateway instead.
 - If you need a full cross-machine setup guide (OpenClaw + Tailscale + Claw3D), follow [`TUTORIAL.md`](TUTORIAL.md).
 
+### One-click NovaSpine for existing OpenClaw installs
+
+If you already use OpenClaw, Claw3D can wire NovaSpine into that install for you from the onboarding flow or the gateway connection panel.
+
+What Claw3D does in that setup flow:
+
+- detects your local OpenClaw CLI and config
+- checks that Python 3.12+ and Git are available
+- fetches a local NovaSpine source cache
+- installs the NovaSpine Python package
+- patches your OpenClaw config to use NovaSpine memory and context slots
+- validates the updated OpenClaw config
+
+What stays the same:
+
+- your OpenClaw install
+- your model/provider setup
+- your gateway URL and token flow
+
+What improves:
+
+- long-term memory and recall
+- context injection
+- consciousness/dream/wiki surfaces exposed by the NovaSpine-backed OpenClaw path
+
+See [`docs/integrations/novaspine-openclaw.md`](docs/integrations/novaspine-openclaw.md) for the exact flow and requirements.
+
 Run from source:
 
 ```bash
