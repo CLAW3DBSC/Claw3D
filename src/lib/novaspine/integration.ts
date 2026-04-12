@@ -48,7 +48,7 @@ type CommandResult = {
 };
 
 const SUPPORTED_OPENCLAW_VERSIONS = new Set(["2026.4.5", "2026.4.7", "2026.4.9", "2026.4.10"]);
-const BUNDLED_NOVASPINE_VERSION = "0.3.0";
+const BUNDLED_NOVASPINE_VERSION = "0.3.1";
 const DEFAULT_NOVASPINE_PIP_SPEC = `novaspine==${BUNDLED_NOVASPINE_VERSION}`;
 const DEFAULT_NOVASPINE_BASE_URL = "http://127.0.0.1:8420";
 const DEFAULT_CONSCIOUSNESS_BASE_URL = "http://127.0.0.1:4111";
@@ -137,6 +137,15 @@ const resolveBundledNovaSpineAssetRoot = (env: NodeJS.ProcessEnv = process.env):
   const override = env.CLAW3D_NOVASPINE_ASSET_ROOT?.trim();
   if (override) return path.resolve(override);
   return path.join(process.cwd(), "vendor", "novaspine-openclaw", BUNDLED_NOVASPINE_VERSION);
+};
+
+const resolveBundledNovaSpineWheelPath = (assetRoot: string): string | null => {
+  const distDir = path.join(assetRoot, "dist");
+  if (!fs.existsSync(distDir)) return null;
+  const wheel = fs
+    .readdirSync(distDir)
+    .find((entry) => entry.startsWith(`novaspine-${BUNDLED_NOVASPINE_VERSION}-`) && entry.endsWith(".whl"));
+  return wheel ? path.join(distDir, wheel) : null;
 };
 
 const resolveNovaSpinePackageSpec = (env: NodeJS.ProcessEnv = process.env): string =>
@@ -311,8 +320,15 @@ const stepResult = (name: string, result: CommandResult): { name: string; ok: bo
     .join(" | ") || (result.ok ? "ok" : "command failed"),
 });
 
-const installNovaSpinePythonPackage = (env: NodeJS.ProcessEnv, packageSpec: string) =>
-  runCommand("python3", ["-m", "pip", "install", "--user", "--upgrade", packageSpec], { env });
+const installNovaSpinePythonPackage = (
+  env: NodeJS.ProcessEnv,
+  packageSpec: string,
+  assetRoot: string
+) => {
+  const overrideSpec = env.CLAW3D_NOVASPINE_PIP_SPEC?.trim();
+  const installTarget = overrideSpec || resolveBundledNovaSpineWheelPath(assetRoot) || packageSpec;
+  return runCommand("python3", ["-m", "pip", "install", "--user", "--upgrade", installTarget], { env });
+};
 
 const installBundledOpenClawAssets = (params: {
   assetRoot: string;
@@ -416,7 +432,7 @@ export const installNovaSpineIntoOpenClaw = (
   }
 
   const steps: NovaSpineInstallResult["steps"] = [];
-  const pipInstall = installNovaSpinePythonPackage(env, initial.packageSpec);
+  const pipInstall = installNovaSpinePythonPackage(env, initial.packageSpec, initial.assetRoot);
   steps.push(stepResult("python-package", pipInstall));
   if (!pipInstall.ok) {
     return { ok: false, steps, status: getNovaSpineIntegrationStatus(env) };

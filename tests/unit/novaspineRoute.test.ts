@@ -39,11 +39,13 @@ describe("/api/novaspine route", () => {
     fs.mkdirSync(path.join(root, "packages", "openclaw-context-engine"), { recursive: true });
     fs.mkdirSync(path.join(root, "packages", "openclaw-consciousness"), { recursive: true });
     fs.mkdirSync(path.join(root, "scripts"), { recursive: true });
+    fs.mkdirSync(path.join(root, "dist"), { recursive: true });
     fs.writeFileSync(path.join(root, "patch-openclaw-config.py"), "#!/usr/bin/env python3\n", "utf8");
     fs.writeFileSync(path.join(root, "packages", "openclaw-memory-plugin", "package.json"), "{}", "utf8");
     fs.writeFileSync(path.join(root, "packages", "openclaw-context-engine", "package.json"), "{}", "utf8");
     fs.writeFileSync(path.join(root, "packages", "openclaw-consciousness", "package.json"), "{}", "utf8");
     fs.writeFileSync(path.join(root, "scripts", "run-memory-maintenance.sh"), "#!/usr/bin/env bash\n", "utf8");
+    fs.writeFileSync(path.join(root, "dist", "novaspine-0.3.1-py3-none-any.whl"), "wheel", "utf8");
   };
 
   beforeEach(() => {
@@ -183,6 +185,14 @@ describe("/api/novaspine route", () => {
         expect.objectContaining({ name: "openclaw-config-patch", ok: true }),
       ])
     );
+    expect(
+      mockedSpawnSync.mock.calls.some(
+        ([command, args]) =>
+          command === "python3" &&
+          Array.isArray(args) &&
+          args.includes(path.join(assetDir!, "dist", "novaspine-0.3.1-py3-none-any.whl"))
+      )
+    ).toBe(true);
 
     const patched = JSON.parse(fs.readFileSync(configPath, "utf8")) as {
       plugins?: { slots?: { memory?: string; contextEngine?: string } };
