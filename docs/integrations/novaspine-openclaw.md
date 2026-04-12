@@ -28,7 +28,7 @@ Claw3D does not bundle a second runtime. It upgrades the user's existing OpenCla
 - forcing the OpenClaw config onto NovaSpine's memory and context slots
 - validating the final config
 
-In the current Claw3D bundle, the OpenClaw-side assets and bundled Python wheel are pinned to NovaSpine `0.3.1` and include the OpenClaw `2026.4.10` Active Memory-compatible plugin snapshot plus the FAISS dedupe fix.
+In the current Claw3D bundle, the OpenClaw-side assets and bundled Python wheel are pinned to NovaSpine `0.3.2` and include the OpenClaw `2026.4.10` Active Memory-compatible plugin snapshot plus the FAISS dedupe fix, the safer oversized-chunk backfill path, and embedding-cache scoping fixes.
 
 ## What This Enables
 

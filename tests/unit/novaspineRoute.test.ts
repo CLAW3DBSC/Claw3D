@@ -45,7 +45,7 @@ describe("/api/novaspine route", () => {
     fs.writeFileSync(path.join(root, "packages", "openclaw-context-engine", "package.json"), "{}", "utf8");
     fs.writeFileSync(path.join(root, "packages", "openclaw-consciousness", "package.json"), "{}", "utf8");
     fs.writeFileSync(path.join(root, "scripts", "run-memory-maintenance.sh"), "#!/usr/bin/env bash\n", "utf8");
-    fs.writeFileSync(path.join(root, "dist", "novaspine-0.3.1-py3-none-any.whl"), "wheel", "utf8");
+    fs.writeFileSync(path.join(root, "dist", "novaspine-0.3.2-py3-none-any.whl"), "wheel", "utf8");
   };
 
   beforeEach(() => {
@@ -190,7 +190,7 @@ describe("/api/novaspine route", () => {
         ([command, args]) =>
           command === "python3" &&
           Array.isArray(args) &&
-          args.includes(path.join(assetDir!, "dist", "novaspine-0.3.1-py3-none-any.whl"))
+          args.includes(path.join(assetDir!, "dist", "novaspine-0.3.2-py3-none-any.whl"))
       )
     ).toBe(true);
 
