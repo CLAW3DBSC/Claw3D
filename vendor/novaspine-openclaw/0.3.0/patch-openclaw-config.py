@@ -73,6 +73,7 @@ def _default_plugin_entries(base_url: str, consciousness_base_url: str, active_m
                 "autoCapture": True,
                 "sessionIngestOnReset": True,
                 "sessionSnapshotOnReset": True,
+                "sessionSnapshotMaxPerDay": 6,
                 "guidance": True,
                 "recallTopK": 6,
                 "recallMinScore": 0.005,

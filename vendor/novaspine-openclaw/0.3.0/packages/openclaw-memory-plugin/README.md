@@ -47,6 +47,7 @@ That installs the plugin packages into OpenClaw, patches the config safely when
           "baseUrl": "http://127.0.0.1:8420",
           "autoRecall": true,
           "autoCapture": false,
+          "sessionSnapshotMaxPerDay": 6,
           "recallTopK": 5,
           "recallMinScore": 0.005,
           "recallFormat": "xml",

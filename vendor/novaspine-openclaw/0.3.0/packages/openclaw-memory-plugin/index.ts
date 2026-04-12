@@ -39,6 +39,7 @@ type NovaSpinePluginConfig = {
   autoCapture: boolean;
   sessionIngestOnReset: boolean;
   sessionSnapshotOnReset: boolean;
+  sessionSnapshotMaxPerDay: number;
   guidance: boolean;
   recallTopK: number;
   recallMinScore: number;
@@ -464,6 +465,7 @@ function normalizeConfig(pluginConfig: unknown): NovaSpinePluginConfig {
     autoCapture: readBoolean(raw.autoCapture, false),
     sessionIngestOnReset: readBoolean(raw.sessionIngestOnReset, readBoolean(raw.autoCapture, false)),
     sessionSnapshotOnReset: readBoolean(raw.sessionSnapshotOnReset, true),
+    sessionSnapshotMaxPerDay: Math.max(1, Math.min(20, Math.floor(readNumber(raw.sessionSnapshotMaxPerDay, 6)))),
     guidance: readBoolean(raw.guidance, true),
     recallTopK: Math.max(1, Math.min(20, Math.floor(readNumber(raw.recallTopK, 5)))),
     recallMinScore: Math.max(0, Math.min(1, readNumber(raw.recallMinScore, 0.005))),
@@ -884,6 +886,39 @@ async function writeWorkspaceMemory(api: OpenClawPluginApi, text: string, metada
     .filter(Boolean)
     .join("\n");
   await appendFile(target, entry, "utf-8");
+  return target;
+}
+
+function splitWorkspaceMemoryEntries(text: string): string[] {
+  const trimmed = text.trim();
+  if (!trimmed) return [];
+  return trimmed
+    .split(/\n(?=##\s)/g)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+function isBeforeResetSnapshotEntry(entry: string): boolean {
+  return entry.includes("Session snapshot before reset:") && entry.includes("source=before_reset");
+}
+
+async function pruneResetSnapshots(target: string, maxEntries: number): Promise<void> {
+  const existing = await readTextFile(target);
+  if (!existing) return;
+  const entries = splitWorkspaceMemoryEntries(existing);
+  let resetSeen = 0;
+  const keep = new Array(entries.length).fill(true);
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    if (!isBeforeResetSnapshotEntry(entries[index])) continue;
+    resetSeen += 1;
+    if (resetSeen > maxEntries) keep[index] = false;
+  }
+  if (keep.every(Boolean)) return;
+  const rendered = entries
+    .filter((_, index) => keep[index])
+    .map((entry) => `${entry}\n`)
+    .join("\n");
+  await writeFile(target, rendered, "utf-8");
 }
 
 async function computeFingerprint(filePath: string): Promise<string | undefined> {
@@ -1444,6 +1479,7 @@ const novaspineMemoryPlugin = {
               autoRecall: cfg.autoRecall,
               sessionIngestOnReset: cfg.sessionIngestOnReset,
               sessionSnapshotOnReset: cfg.sessionSnapshotOnReset,
+              sessionSnapshotMaxPerDay: cfg.sessionSnapshotMaxPerDay,
             });
           } catch (error) {
             return formatTool({ ok: false, error: String(error) });
@@ -2300,7 +2336,7 @@ const novaspineMemoryPlugin = {
       try {
         const snapshot = summarizeMessages(event.messages, cfg.captureMaxMessages, cfg.captureMinChars);
         if (!snapshot.length) return;
-        await writeWorkspaceMemory(
+        const target = await writeWorkspaceMemory(
           api,
           `Session snapshot before reset:\n${snapshot.join("\n")}`,
           {
@@ -2309,6 +2345,7 @@ const novaspineMemoryPlugin = {
             session_file: sessionFile || "",
           },
         );
+        await pruneResetSnapshots(target, cfg.sessionSnapshotMaxPerDay);
       } catch (error) {
         logWarnOnce(api.logger, logCooldowns, "novaspine-memory.snapshot", `novaspine-memory: reset snapshot failed: ${String(error)}`);
       }

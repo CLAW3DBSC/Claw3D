@@ -27,6 +27,11 @@
       "label": "Snapshot On Reset",
       "help": "Mirror a short session snapshot into workspace memory before reset/new-session boundaries."
     },
+    "sessionSnapshotMaxPerDay": {
+      "label": "Reset Snapshots / Day",
+      "placeholder": "6",
+      "help": "Keep at most this many reset snapshots per daily workspace memory file."
+    },
     "guidance": {
       "label": "Prompt Guidance",
       "help": "Inject static NovaSpine usage guidance so the model uses the right memory tools."
@@ -68,6 +73,7 @@
       "autoCapture": { "type": "boolean" },
       "sessionIngestOnReset": { "type": "boolean" },
       "sessionSnapshotOnReset": { "type": "boolean" },
+      "sessionSnapshotMaxPerDay": { "type": "number", "minimum": 1, "maximum": 20 },
       "guidance": { "type": "boolean" },
       "recallTopK": { "type": "number", "minimum": 1, "maximum": 20 },
       "recallMinScore": { "type": "number", "minimum": 0, "maximum": 1 },
