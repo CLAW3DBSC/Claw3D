@@ -113,6 +113,7 @@ What improves:
 - long-term memory and recall
 - context injection
 - consciousness/dream/wiki surfaces exposed by the NovaSpine-backed OpenClaw path
+- stronger personal-memory retrieval and current-state recall in the bundled NovaSpine release
 
 See [`docs/integrations/novaspine-openclaw.md`](docs/integrations/novaspine-openclaw.md) for the exact flow and requirements.
 

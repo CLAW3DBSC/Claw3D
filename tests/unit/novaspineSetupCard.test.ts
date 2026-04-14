@@ -6,15 +6,15 @@ import { NovaSpineSetupCard } from "@/features/agents/components/NovaSpineSetupC
 
 const readyStatus = {
   openclawDetected: true,
-  openclawVersion: "2026.4.10",
+  openclawVersion: "2026.4.12",
   openclawVersionValidated: true,
   pythonDetected: true,
   pythonVersion: "3.12.3",
   pythonSupported: true,
   novaspineModuleDetected: false,
   openclawConfigPath: "/tmp/openclaw.json",
-  bundledVersion: "0.3.2",
-  packageSpec: "novaspine==0.3.2",
+  bundledVersion: "0.3.3",
+  packageSpec: "novaspine==0.3.3",
   memorySlot: null,
   contextEngineSlot: null,
   consciousnessEnabled: false,

@@ -47,8 +47,15 @@ type CommandResult = {
   error?: string;
 };
 
-const SUPPORTED_OPENCLAW_VERSIONS = new Set(["2026.4.5", "2026.4.7", "2026.4.9", "2026.4.10"]);
-const BUNDLED_NOVASPINE_VERSION = "0.3.2";
+const SUPPORTED_OPENCLAW_VERSIONS = new Set([
+  "2026.4.5",
+  "2026.4.7",
+  "2026.4.9",
+  "2026.4.10",
+  "2026.4.11",
+  "2026.4.12",
+]);
+const BUNDLED_NOVASPINE_VERSION = "0.3.3";
 const DEFAULT_NOVASPINE_PIP_SPEC = `novaspine==${BUNDLED_NOVASPINE_VERSION}`;
 const DEFAULT_NOVASPINE_BASE_URL = "http://127.0.0.1:8420";
 const DEFAULT_CONSCIOUSNESS_BASE_URL = "http://127.0.0.1:4111";
