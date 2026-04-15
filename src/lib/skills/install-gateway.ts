@@ -5,6 +5,7 @@ import {
 } from "@/lib/gateway/agentConfig";
 import { getPackagedSkillById } from "@/lib/skills/catalog";
 import { readPackagedSkillFiles } from "@/lib/skills/packaged";
+import { buildPackagedSkillGeneratedFiles } from "@/lib/skills/packaged-setup";
 import {
   resolveWorkspaceFromAgentFiles,
   type PackagedSkillInstallRequest,
@@ -118,7 +119,10 @@ export const installPackagedSkillViaGatewayAgent = async (params: {
     agentId: params.request.agentId,
     agentName: params.request.agentName,
   });
-  const files = readPackagedSkillFiles(packagedSkill.packageId);
+  const files = [
+    ...readPackagedSkillFiles(packagedSkill.packageId),
+    ...buildPackagedSkillGeneratedFiles(packagedSkill.packageId, params.request.setupValues),
+  ];
   const installerName = `Skill Installer ${Date.now()}`;
 
   let installerAgentId: string | null = null;

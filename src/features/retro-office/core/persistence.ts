@@ -3,6 +3,7 @@ import {
   GYM_ROOM_MIGRATION_KEY,
   PHONE_BOOTH_MIGRATION_KEY,
   QA_LAB_MIGRATION_KEY,
+  SHOP_ANNEX_SHELVES_MIGRATION_KEY,
   SMS_BOOTH_MIGRATION_KEY,
   SERVER_ROOM_MIGRATION_KEY,
   STORAGE_KEY,
@@ -89,4 +90,11 @@ export const hasSmsBoothMigrationApplied = (namespace = "default") =>
 
 export const markSmsBoothMigrationApplied = (namespace = "default") => {
   markStorageFlag(SMS_BOOTH_MIGRATION_KEY, namespace);
+};
+
+export const hasShopAnnexShelvesMigrationApplied = (namespace = "default") =>
+  hasStorageFlag(SHOP_ANNEX_SHELVES_MIGRATION_KEY, namespace);
+
+export const markShopAnnexShelvesMigrationApplied = (namespace = "default") => {
+  markStorageFlag(SHOP_ANNEX_SHELVES_MIGRATION_KEY, namespace);
 };

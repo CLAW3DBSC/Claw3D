@@ -97,6 +97,7 @@ import {
 import {
   TRANSCRIPT_V2_ENABLED,
   logTranscriptDebugMetric,
+  type TranscriptEntry,
 } from "@/features/agents/state/transcript";
 import {
   buildGatewayModelChoices,
@@ -139,7 +140,9 @@ import { AnalyticsPanel } from "@/features/office/components/panels/AnalyticsPan
 import { HistoryPanel } from "@/features/office/components/panels/HistoryPanel";
 import { InboxPanel } from "@/features/office/components/panels/InboxPanel";
 import { KanbanDisabledPanel } from "@/features/office/components/panels/KanbanDisabledPanel";
+import { PackagedSkillSetupModal } from "@/features/office/components/panels/PackagedSkillSetupModal";
 import { PlaybooksPanel } from "@/features/office/components/panels/PlaybooksPanel";
+import { ShopDisabledPanel } from "@/features/office/components/panels/ShopDisabledPanel";
 import { SkillsMarketplaceModal } from "@/features/office/components/panels/SkillsMarketplaceModal";
 import { TaskBoardPanel } from "@/features/office/components/panels/TaskBoardPanel";
 import { JukeboxPanel } from "@/features/spotify-jukebox/components/JukeboxPanel";
@@ -186,6 +189,10 @@ import {
   type OfficeDeskMonitor,
 } from "@/lib/office/deskMonitor";
 import { deriveSkillReadinessState } from "@/lib/skills/presentation";
+import {
+  getPackagedSkillSetupDefinition,
+  type PackagedSkillSetupValues,
+} from "@/lib/skills/packaged-setup";
 import type { StandupAgentSnapshot } from "@/lib/office/standup/types";
 import type { SkillStatusEntry } from "@/lib/skills/types";
 
@@ -217,6 +224,7 @@ const MAX_OPENCLAW_AGENT_OUTPUT_LINES = 12;
 const OFFICE_DANCE_MS = 60_000;
 const GATEWAY_LOADING_OVERLAY_DELAY_MS = 1_200;
 const GATEWAY_CONNECT_OVERLAY_DELAY_MS = 1_500;
+const AMAZON_ORDERING_SETUP = getPackagedSkillSetupDefinition("amazon-ordering");
 
 const getLatestUserRequestForAgent = (
   agent: AgentState,
@@ -240,6 +248,62 @@ const getLatestUserRequestForAgent = (
     text: fallback,
     requestKey: `${agent.sessionKey}:fallback:${fallback}`,
   };
+};
+
+type ShopRequestForAgent = {
+  text: string;
+  requestKey: string;
+  sequenceKey: number;
+};
+
+const SHOP_ORDER_COMPLETION_PATTERNS = [
+  /\byour\s+order\s+has\s+been\s+placed\b/i,
+  /\bplaced\s+(?:the\s+)?order\b/i,
+  /\b(?:order|purchase)\s+(?:has\s+been\s+)?(?:placed|completed|submitted|confirmed)\b/i,
+  /\bcheckout\s+(?:is\s+)?complete\b/i,
+  /\bcompleted\s+(?:the\s+)?checkout\b/i,
+] as const;
+
+const isShopOrderCompletionText = (text: string): boolean => {
+  const normalized = stripUiMetadata(text).trim();
+  return SHOP_ORDER_COMPLETION_PATTERNS.some((pattern) => pattern.test(normalized));
+};
+
+const getLatestShopRequestForAgent = (agent: AgentState): ShopRequestForAgent | null => {
+  const transcriptEntries = Array.isArray(agent.transcriptEntries)
+    ? agent.transcriptEntries
+    : [];
+  for (let index = transcriptEntries.length - 1; index >= 0; index -= 1) {
+    const entry = transcriptEntries[index];
+    if (!entry || entry.role !== "user") continue;
+    const text = entry.text.trim();
+    if (!text || resolveOfficeIntentSnapshot(text).shop !== "shop") continue;
+    return {
+      text,
+      requestKey: `${agent.sessionKey}:${entry.entryId}:${text}`,
+      sequenceKey: entry.sequenceKey,
+    };
+  }
+  return null;
+};
+
+const findLatestShopCompletionForAgent = (
+  agent: AgentState,
+  shopRequest: ShopRequestForAgent,
+): TranscriptEntry | null => {
+  const transcriptEntries = Array.isArray(agent.transcriptEntries)
+    ? agent.transcriptEntries
+    : [];
+  for (let index = transcriptEntries.length - 1; index >= 0; index -= 1) {
+    const entry = transcriptEntries[index];
+    if (!entry) continue;
+    if (entry.sequenceKey <= shopRequest.sequenceKey) break;
+    if (entry.role !== "assistant") continue;
+    if (isShopOrderCompletionText(entry.text)) {
+      return entry;
+    }
+  }
+  return null;
 };
 
 type OpenClawLogEntry = {
@@ -886,6 +950,7 @@ export function OfficeScreen({
         officeAgent: OfficeAgent;
         phoneBoothHeld: boolean;
         qaHeld: boolean;
+        shopHeld: boolean;
         smsBoothHeld: boolean;
       }
     >
@@ -999,6 +1064,24 @@ export function OfficeScreen({
     message: "",
     error: null,
   });
+  const [shopOpen, setShopOpen] = useState(false);
+  const [shopInstallSetupOpen, setShopInstallSetupOpen] = useState(false);
+  const [shopInstallSetupValues, setShopInstallSetupValues] = useState<PackagedSkillSetupValues>({});
+  const [shopInstallProgress, setShopInstallProgress] = useState<{
+    active: boolean;
+    percent: number;
+    message: string;
+    error: string | null;
+  }>({
+    active: false,
+    percent: 0,
+    message: "",
+    error: null,
+  });
+  const [suppressedShopRequestKeyByAgentId, setSuppressedShopRequestKeyByAgentId] =
+    useState<Record<string, string>>({});
+  const [shopOrderCompletionSignal, setShopOrderCompletionSignal] = useState(0);
+  const handledShopCompletionKeysRef = useRef<Set<string>>(new Set());
   const [danceUntilByAgentId, setDanceUntilByAgentId] = useState<Record<string, number>>({});
   const initJukeboxStore = useJukeboxStore((state) => state.init);
   const jukeboxToken = useJukeboxStore((state) => state.token);
@@ -2773,6 +2856,51 @@ export function OfficeScreen({
     onSkillActivityStart: handleMarketplaceGymStart,
     onSkillActivityEnd: handleMarketplaceGymEnd,
   });
+  const handleShopAmazonInstall = useCallback(
+    async (setupValues: PackagedSkillSetupValues) => {
+      const targetAgentId =
+        (selectedChatAgentId ?? state.selectedAgentId ?? state.agents[0]?.agentId ?? "").trim() || null;
+      setShopInstallSetupValues(setupValues);
+      setShopInstallSetupOpen(false);
+      setShopInstallProgress({
+        active: true,
+        percent: 8,
+        message: "Starting AMAZON skill installation.",
+        error: null,
+      });
+      try {
+        await marketplace.handleInstallPackagedSkillAndEnable({
+          skillKey: "amazon-ordering",
+          agentId: targetAgentId,
+          setupValues,
+          onProgress: ({ percent, message }) => {
+            setShopInstallProgress({
+              active: true,
+              percent,
+              message,
+              error: null,
+            });
+          },
+        });
+        setShopInstallProgress({
+          active: false,
+          percent: 0,
+          message: "",
+          error: null,
+        });
+        setShopOpen(false);
+      } catch (error) {
+        setShopInstallProgress((current) => ({
+          ...current,
+          active: false,
+          error: error instanceof Error ? error.message : "Failed to install AMAZON.",
+        }));
+        setShopInstallSetupOpen(true);
+        throw error;
+      }
+    },
+    [marketplace, selectedChatAgentId, state.agents, state.selectedAgentId]
+  );
   const skillTriggers = useOfficeSkillTriggers({
     client,
     status,
@@ -2790,6 +2918,20 @@ export function OfficeScreen({
     const skillTriggerHoldMaps = buildOfficeSkillTriggerHoldMaps(
       skillTriggers.movementTargetByAgentId,
     );
+    const shopHoldByAgentId = {
+      ...base.shopHoldByAgentId,
+      ...skillTriggerHoldMaps.shopHoldByAgentId,
+    };
+    for (const agent of state.agents) {
+      const latestShopRequest = getLatestShopRequestForAgent(agent);
+      if (!latestShopRequest) continue;
+      if (
+        suppressedShopRequestKeyByAgentId[agent.agentId] ===
+        latestShopRequest.requestKey
+      ) {
+        delete shopHoldByAgentId[agent.agentId];
+      }
+    }
 
     return {
       ...base,
@@ -2806,6 +2948,7 @@ export function OfficeScreen({
         ...base.gymHoldByAgentId,
         ...skillTriggerHoldMaps.gymHoldByAgentId,
       },
+      shopHoldByAgentId,
       jukeboxHoldByAgentId: {
         ...base.jukeboxHoldByAgentId,
         ...skillTriggerHoldMaps.jukeboxHoldByAgentId,
@@ -2826,7 +2969,67 @@ export function OfficeScreen({
     officeTriggerState,
     skillTriggers.movementTargetByAgentId,
     state.agents,
+    suppressedShopRequestKeyByAgentId,
   ]);
+  useEffect(() => {
+    const completions: Array<{
+      agentId: string;
+      agentName: string;
+      handledKey: string;
+      requestKey: string;
+    }> = [];
+    for (const agent of state.agents) {
+      if (!officeAnimationState.shopHoldByAgentId[agent.agentId]) continue;
+      const latestShopRequest = getLatestShopRequestForAgent(agent);
+      if (!latestShopRequest) continue;
+      const completionEntry = findLatestShopCompletionForAgent(agent, latestShopRequest);
+      if (!completionEntry) continue;
+      const handledKey = `${agent.agentId}:${latestShopRequest.requestKey}:${completionEntry.entryId}`;
+      if (handledShopCompletionKeysRef.current.has(handledKey)) continue;
+      completions.push({
+        agentId: agent.agentId,
+        agentName: agent.name || "Agent",
+        handledKey,
+        requestKey: latestShopRequest.requestKey,
+      });
+    }
+    if (completions.length === 0) return;
+    for (const completion of completions) {
+      handledShopCompletionKeysRef.current.add(completion.handledKey);
+    }
+    setSuppressedShopRequestKeyByAgentId((previous) => {
+      const next = { ...previous };
+      for (const completion of completions) {
+        next[completion.agentId] = completion.requestKey;
+      }
+      return next;
+    });
+    setShopOrderCompletionSignal((current) => current + 1);
+  }, [officeAnimationState.shopHoldByAgentId, state.agents]);
+  useEffect(() => {
+    if (!shopOrderCompletionSignal) return;
+    let cancelled = false;
+    void import("canvas-confetti")
+      .then(({ default: confetti }) => {
+        if (cancelled) return;
+        confetti({
+          particleCount: 120,
+          spread: 82,
+          startVelocity: 42,
+          origin: { x: 0.25, y: 0.7 },
+        });
+        confetti({
+          particleCount: 120,
+          spread: 82,
+          startVelocity: 42,
+          origin: { x: 0.75, y: 0.7 },
+        });
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [shopOrderCompletionSignal]);
   const {
     deskHoldByAgentId,
     githubHoldByAgentId,
@@ -2836,6 +3039,7 @@ export function OfficeScreen({
     phoneBoothHoldByAgentId,
     phoneCallByAgentId,
     qaHoldByAgentId,
+    shopHoldByAgentId,
     smsBoothHoldByAgentId,
     skillGymHoldByAgentId,
     textMessageByAgentId,
@@ -3432,7 +3636,7 @@ export function OfficeScreen({
           createOpenClawLogEntry({
             eventName: "office-intent",
             eventKind: "derived",
-            summary: `agent=${agentId} gym=${intentSnapshot.gym?.source ?? "-"} qa=${intentSnapshot.qa ?? "-"} github=${intentSnapshot.github ?? "-"} desk=${intentSnapshot.desk ?? "-"} text=${intentSnapshot.text?.phase ?? "-"}`,
+            summary: `agent=${agentId} gym=${intentSnapshot.gym?.source ?? "-"} shop=${intentSnapshot.shop ?? "-"} qa=${intentSnapshot.qa ?? "-"} github=${intentSnapshot.github ?? "-"} desk=${intentSnapshot.desk ?? "-"} text=${intentSnapshot.text?.phase ?? "-"}`,
             payload: {
               agentId,
               message: trimmed,
@@ -3448,6 +3652,7 @@ export function OfficeScreen({
       const hasImmediateOfficeTrigger = Boolean(
         intentSnapshot.desk ||
           intentSnapshot.github ||
+          intentSnapshot.shop ||
           intentSnapshot.gym ||
           intentSnapshot.qa ||
           intentSnapshot.standup ||
@@ -3459,6 +3664,7 @@ export function OfficeScreen({
         !intentSnapshot.text &&
         !intentSnapshot.desk &&
         !intentSnapshot.github &&
+        !intentSnapshot.shop &&
         !intentSnapshot.gym &&
         !intentSnapshot.qa &&
         !intentSnapshot.standup;
@@ -3468,6 +3674,7 @@ export function OfficeScreen({
         !intentSnapshot.text &&
         !intentSnapshot.desk &&
         !intentSnapshot.github &&
+        !intentSnapshot.shop &&
         !intentSnapshot.gym &&
         !intentSnapshot.qa &&
         !intentSnapshot.standup;
@@ -3713,6 +3920,7 @@ export function OfficeScreen({
         officeAgent: OfficeAgent;
         phoneBoothHeld: boolean;
         qaHeld: boolean;
+        shopHeld: boolean;
         smsBoothHeld: boolean;
       }
     >();
@@ -3722,6 +3930,7 @@ export function OfficeScreen({
       const gymHeld = Boolean(gymHoldByAgentId[agent.agentId]);
       const phoneBoothHeld = Boolean(phoneBoothHoldByAgentId[agent.agentId]);
       const qaHeld = Boolean(qaHoldByAgentId[agent.agentId]);
+      const shopHeld = Boolean(shopHoldByAgentId[agent.agentId]);
       const smsBoothHeld = Boolean(smsBoothHoldByAgentId[agent.agentId]);
       const cached = officeAgentCacheRef.current.get(agent.agentId);
       if (
@@ -3732,6 +3941,7 @@ export function OfficeScreen({
         cached.gymHeld === gymHeld &&
         cached.phoneBoothHeld === phoneBoothHeld &&
         cached.qaHeld === qaHeld &&
+        cached.shopHeld === shopHeld &&
         cached.smsBoothHeld === smsBoothHeld
       ) {
         nextCache.set(agent.agentId, cached);
@@ -3753,6 +3963,8 @@ export function OfficeScreen({
                   agent.runId ??
                   (qaHeld
                     ? `qa-hold-${agent.agentId}`
+                    : shopHeld
+                      ? `shop-hold-${agent.agentId}`
                     : smsBoothHeld
                       ? `text-hold-${agent.agentId}`
                     : phoneBoothHeld
@@ -3771,6 +3983,7 @@ export function OfficeScreen({
         officeAgent,
         phoneBoothHeld,
         qaHeld,
+        shopHeld,
         smsBoothHeld,
       });
       return officeAgent;
@@ -3783,6 +3996,7 @@ export function OfficeScreen({
     gymHoldByAgentId,
     phoneBoothHoldByAgentId,
     qaHoldByAgentId,
+    shopHoldByAgentId,
     smsBoothHoldByAgentId,
     state.agents,
     workingUntilByAgentId,
@@ -4023,6 +4237,15 @@ export function OfficeScreen({
       }) ?? null,
     [marketplace.skillsReport],
   );
+  const amazonOrderingSkill = useMemo<SkillStatusEntry | null>(
+    () =>
+      marketplace.skillsReport?.skills.find((skill) => {
+        const normalizedKey = skill.skillKey.trim().toLowerCase();
+        const normalizedName = skill.name.trim().toLowerCase();
+        return normalizedKey === "amazon-ordering" || normalizedName === "amazon";
+      }) ?? null,
+    [marketplace.skillsReport],
+  );
   const taskManagerSkill = useMemo<SkillStatusEntry | null>(
     () =>
       marketplace.skillsReport?.skills.find((skill) => {
@@ -4039,6 +4262,13 @@ export function OfficeScreen({
   const soundclawReady = useMemo(
     () => (soundclawSkill ? deriveSkillReadinessState(soundclawSkill) === "ready" : false),
     [soundclawSkill]
+  );
+  const amazonOrderingReady = useMemo(
+    () =>
+      amazonOrderingSkill
+        ? deriveSkillReadinessState(amazonOrderingSkill) === "ready"
+        : false,
+    [amazonOrderingSkill],
   );
 
   useEffect(() => {
@@ -4183,6 +4413,7 @@ export function OfficeScreen({
       agent.status === "running" ||
       deskHoldByAgentId[agent.agentId] ||
       gymHoldByAgentId[agent.agentId] ||
+      shopHoldByAgentId[agent.agentId] ||
       jukeboxHoldByAgentId[agent.agentId] ||
       phoneBoothHoldByAgentId[agent.agentId] ||
       smsBoothHoldByAgentId[agent.agentId] ||
@@ -4251,6 +4482,8 @@ export function OfficeScreen({
           monitorAgentId={monitorAgentId}
           monitorByAgentId={monitorByAgentId}
           githubSkill={githubSkill}
+          amazonOrderingEnabled={amazonOrderingReady}
+          shopOrderCompletionSignal={shopOrderCompletionSignal}
           taskManagerEnabled={taskManagerReady}
           soundclawEnabled={soundclawReady}
           officeTitle={officeTitle}
@@ -4353,6 +4586,9 @@ export function OfficeScreen({
           onJukeboxInteract={() => {
             setJukeboxOpen(true);
           }}
+          onShopInteract={() => {
+            setShopOpen(true);
+          }}
           onKanbanInteract={() => {
             setKanbanInstallPromptOpen(true);
           }}
@@ -4397,6 +4633,41 @@ export function OfficeScreen({
               }}
             />
           )
+        ) : null}
+        {shopOpen && !shopInstallSetupOpen ? (
+          amazonOrderingReady ? null : (
+            <ShopDisabledPanel
+              onClose={() => setShopOpen(false)}
+              onInstall={() => {
+                setShopInstallProgress({
+                  active: false,
+                  percent: 0,
+                  message: "",
+                  error: null,
+                });
+                setShopInstallSetupOpen(true);
+              }}
+              installing={shopInstallProgress.active}
+              progressPercent={shopInstallProgress.percent}
+              progressMessage={shopInstallProgress.message}
+              errorMessage={shopInstallProgress.error}
+            />
+          )
+        ) : null}
+        {shopOpen && !amazonOrderingReady && shopInstallSetupOpen && AMAZON_ORDERING_SETUP ? (
+          <PackagedSkillSetupModal
+            skillName="amazon"
+            definition={AMAZON_ORDERING_SETUP}
+            initialValues={shopInstallSetupValues}
+            busy={shopInstallProgress.active}
+            errorMessage={shopInstallProgress.error}
+            onClose={() => {
+              if (!shopInstallProgress.active) {
+                setShopInstallSetupOpen(false);
+              }
+            }}
+            onSubmit={handleShopAmazonInstall}
+          />
         ) : null}
         {kanbanInstallPromptOpen ? (
           <KanbanDisabledPanel

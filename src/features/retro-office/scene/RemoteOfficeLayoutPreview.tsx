@@ -19,6 +19,7 @@ const ITEM_COLOR_BY_TYPE: Record<string, string> = {
   couch: "#7e57c2",
   couch_v: "#7e57c2",
   bookshelf: "#8d6e63",
+  grocery_shelf: "#f8fafc",
   plant: "#66bb6a",
   beanbag: "#4db6ac",
   pingpong: "#90caf9",

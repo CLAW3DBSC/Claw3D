@@ -12,6 +12,7 @@ import {
   listPackagedSkills,
 } from "@/lib/skills/catalog";
 import { installPackagedSkillViaGatewayAgent } from "@/lib/skills/install-gateway";
+import type { PackagedSkillSetupValues } from "@/lib/skills/packaged-setup";
 import { resolvePreferredInstallOption } from "@/lib/skills/presentation";
 import { removeSkillFromGateway } from "@/lib/skills/remove";
 import {
@@ -161,6 +162,7 @@ export const useOfficeSkillsMarketplace = ({
       skillKey: string;
       successMessage: string;
       run: (agentId: string, report: SkillStatusReport) => Promise<void>;
+      rethrowOnError?: boolean;
     }) => {
       const agentId = selectedAgentId?.trim() ?? "";
       const report = skillsReport;
@@ -203,6 +205,9 @@ export const useOfficeSkillsMarketplace = ({
         });
         if (!isGatewayDisconnectLikeError(err)) {
           console.error(nextMessage);
+        }
+        if (params.rethrowOnError) {
+          throw err instanceof Error ? err : new Error(nextMessage);
         }
       } finally {
         onSkillActivityEnd?.(agentId);
@@ -265,7 +270,7 @@ export const useOfficeSkillsMarketplace = ({
   );
 
   const handleInstallPackagedSkill = useCallback(
-    async (skillKey: string) => {
+    async (skillKey: string, setupValues?: PackagedSkillSetupValues) => {
       const packagedSkill = getPackagedSkillBySkillKey(skillKey);
       if (!packagedSkill) {
         setMessage({
@@ -277,7 +282,11 @@ export const useOfficeSkillsMarketplace = ({
 
       await runSkillMutation({
         skillKey: packagedSkill.skillKey,
-        successMessage: `Successfully installed ${packagedSkill.name.trim()} in the selected workspace. Enable it for the agent from the CLAW3D tab.`,
+        successMessage:
+          packagedSkill.packageId === "amazon-ordering" && setupValues
+            ? `Installed ${packagedSkill.name.trim()} and saved workspace checkout defaults. Enable it for the agent from the CLAW3D tab.`
+            : `Successfully installed ${packagedSkill.name.trim()} in the selected workspace. Enable it for the agent from the CLAW3D tab.`,
+        rethrowOnError: true,
         run: async (_agentId, report) => {
           await installPackagedSkillViaGatewayAgent({
             client,
@@ -288,6 +297,7 @@ export const useOfficeSkillsMarketplace = ({
               managedSkillsDir: report.managedSkillsDir,
               agentId: selectedAgent?.agentId ?? undefined,
               agentName: selectedAgent?.name ?? undefined,
+              setupValues,
             },
           });
         },
@@ -300,6 +310,7 @@ export const useOfficeSkillsMarketplace = ({
     async (params: {
       skillKey: string;
       agentId?: string | null;
+      setupValues?: PackagedSkillSetupValues;
       onProgress?: (progress: { percent: number; message: string }) => void;
     }) => {
       const packagedSkill = getPackagedSkillBySkillKey(params.skillKey);
@@ -331,9 +342,13 @@ export const useOfficeSkillsMarketplace = ({
           message: "Preparing the workspace skill install.",
         });
         const initialReport = await loadAgentSkillStatus(client, targetAgentId);
+        const packagedSkillLabel = packagedSkill.name.trim();
         params.onProgress?.({
           percent: 38,
-          message: "Installing task-manager into the workspace.",
+          message:
+            packagedSkill.packageId === "amazon-ordering" && params.setupValues
+              ? `Installing ${packagedSkillLabel} and writing workspace defaults.`
+              : `Installing ${packagedSkillLabel} into the workspace.`,
         });
         await installPackagedSkillViaGatewayAgent({
           client,
@@ -345,16 +360,17 @@ export const useOfficeSkillsMarketplace = ({
             agentId: targetAgentId,
             agentName:
               agents.find((agent) => agent.agentId === targetAgentId)?.name ?? undefined,
+            setupValues: params.setupValues,
           },
         });
         params.onProgress?.({
           percent: 62,
-          message: "Enabling task-manager for this gateway.",
+          message: `Enabling ${packagedSkillLabel} for this gateway.`,
         });
         await updateSkill(client, { skillKey: packagedSkill.skillKey, enabled: true });
         params.onProgress?.({
           percent: 78,
-          message: "Enabling task-manager for the main agent.",
+          message: `Enabling ${packagedSkillLabel} for the selected agent.`,
         });
         const refreshedReport = await loadAgentSkillStatus(client, targetAgentId);
         await setAgentSkillEnabled({
@@ -371,7 +387,10 @@ export const useOfficeSkillsMarketplace = ({
         await loadMarketplace(targetAgentId);
         params.onProgress?.({
           percent: 100,
-          message: "Task-manager installed and enabled.",
+          message:
+            packagedSkill.packageId === "amazon-ordering" && params.setupValues
+              ? `${packagedSkillLabel} installed, configured, and enabled.`
+              : `${packagedSkillLabel} installed and enabled.`,
         });
         const agentName =
           agents.find((agent) => agent.agentId === targetAgentId)?.name ?? "the main agent";

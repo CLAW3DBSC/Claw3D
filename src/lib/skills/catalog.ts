@@ -3,7 +3,11 @@ import type {
   SkillStatusEntry,
 } from "@/lib/skills/types";
 
-export type PackagedSkillId = "soundclaw" | "task-manager" | "todo-board";
+export type PackagedSkillId =
+  | "amazon-ordering"
+  | "soundclaw"
+  | "task-manager"
+  | "todo-board";
 
 export type PackagedSkillDefinition = {
   packageId: PackagedSkillId;
@@ -24,6 +28,16 @@ const EMPTY_REQUIREMENTS = {
 };
 
 const PACKAGED_SKILLS: PackagedSkillDefinition[] = [
+  {
+    packageId: "amazon-ordering",
+    skillKey: "amazon-ordering",
+    name: "amazon",
+    description:
+      "Buy and return items on Amazon using browser automation for purchases, reorders, order lookups, and returns.",
+    installSource: "openclaw-workspace",
+    creatorName: "lukethedev",
+    creatorUrl: "https://github.com/iamlukethedev",
+  },
   {
     packageId: "todo-board",
     skillKey: "todo-board",

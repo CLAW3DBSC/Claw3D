@@ -1,5 +1,7 @@
 import type { GatewayClient } from "@/lib/gateway/GatewayClient";
+import { readConfigAgentList, slugifyAgentName } from "@/lib/gateway/agentConfig";
 import { readGatewayAgentFile } from "@/lib/gateway/agentFiles";
+import type { PackagedSkillSetupValues } from "@/lib/skills/packaged-setup";
 
 export type SkillStatusConfigCheck = {
   path: string;
@@ -98,6 +100,7 @@ export type PackagedSkillInstallRequest = {
   managedSkillsDir: string;
   agentId?: string;
   agentName?: string;
+  setupValues?: PackagedSkillSetupValues;
 };
 
 export type PackagedSkillInstallResult = {
@@ -141,6 +144,79 @@ const resolveWorkspaceDirFromPath = (filePath: string | null | undefined): strin
   return candidate;
 };
 
+const resolveWorkspaceCandidate = (value: string | null | undefined): string | null => {
+  const normalized = value?.trim().replace(/[\\/]+$/, "") ?? "";
+  if (!normalized || isLikelyRootWorkspace(normalized)) {
+    return null;
+  }
+  return resolveWorkspaceDirFromPath(normalized) ?? normalized;
+};
+
+const dirnameLike = (value: string): string => {
+  const lastSlash = value.lastIndexOf("/");
+  const lastBackslash = value.lastIndexOf("\\");
+  const idx = Math.max(lastSlash, lastBackslash);
+  if (idx < 0) return "";
+  return value.slice(0, idx);
+};
+
+const joinPathLike = (dir: string, leaf: string): string => {
+  const sep = dir.includes("\\") ? "\\" : "/";
+  const trimmedDir = dir.endsWith("/") || dir.endsWith("\\") ? dir.slice(0, -1) : dir;
+  return `${trimmedDir}${sep}${leaf}`;
+};
+
+const resolveWorkspaceFromAgentConfig = async (
+  client: GatewayClient,
+  agentId: string
+): Promise<string | null> => {
+  try {
+    const snapshot = (await client.call("config.get", {})) as {
+      config?: Record<string, unknown>;
+      path?: string | null;
+    };
+    const entries = readConfigAgentList(snapshot.config);
+    const entry = entries.find((item) => item.id.trim() === agentId.trim()) ?? null;
+    if (!entry) {
+      return null;
+    }
+    const workspace =
+      typeof entry.workspace === "string"
+        ? resolveWorkspaceCandidate(entry.workspace)
+        : null;
+    if (workspace) {
+      return workspace;
+    }
+    const fromPath = typeof entry.path === "string" ? resolveWorkspaceCandidate(entry.path) : null;
+    if (fromPath) {
+      return fromPath;
+    }
+    const configPath = typeof snapshot.path === "string" ? snapshot.path.trim() : "";
+    const stateDir = configPath ? dirnameLike(configPath) : "";
+    if (!stateDir) {
+      return null;
+    }
+    const nameCandidates = [
+      typeof entry.name === "string" ? entry.name.trim() : "",
+      typeof entry.id === "string" ? entry.id.trim() : "",
+    ].filter(Boolean);
+    for (const candidateName of nameCandidates) {
+      try {
+        const slug = slugifyAgentName(candidateName);
+        const derived = resolveWorkspaceCandidate(joinPathLike(stateDir, `workspace-${slug}`));
+        if (derived) {
+          return derived;
+        }
+      } catch {
+        // Ignore invalid names and continue trying other candidates.
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+};
+
 export const resolveWorkspaceFromAgentFiles = async (
   client: GatewayClient,
   agentId: string
@@ -160,7 +236,7 @@ export const resolveWorkspaceFromAgentFiles = async (
       // Best-effort provenance recovery only.
     }
   }
-  return null;
+  return resolveWorkspaceFromAgentConfig(client, agentId);
 };
 
 export const loadAgentSkillStatus = async (

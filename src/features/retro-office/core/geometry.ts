@@ -44,6 +44,7 @@ export const ITEM_FOOTPRINT: Record<string, [number, number]> = {
   couch: [100, 40],
   couch_v: [40, 80],
   bookshelf: [80, 120],
+  grocery_shelf: [70, 130],
   plant: [24, 24],
   beanbag: [40, 40],
   pingpong: [100, 60],
@@ -52,6 +53,7 @@ export const ITEM_FOOTPRINT: Record<string, [number, number]> = {
   fridge: [40, 80],
   water_cooler: [20, 54],
   atm: [42, 38],
+  shop: [78, 56],
   sms_booth: [58, 54],
   phone_booth: [78, 72],
   whiteboard: [10, 60],
@@ -126,6 +128,7 @@ export const ITEM_METADATA: Record<string, { blocksNavigation: boolean; navPaddi
   pingpong:        { blocksNavigation: true  },
   // ── storage / shelving ────────────────────────────────────────────────────
   bookshelf:       { blocksNavigation: true  },
+  grocery_shelf:   { blocksNavigation: true  },
   cabinet:         { blocksNavigation: true  },
   wall_cabinet:    { blocksNavigation: false }, // wall-mounted; agents walk under
   // ── kitchen appliances ────────────────────────────────────────────────────
@@ -139,6 +142,7 @@ export const ITEM_METADATA: Record<string, { blocksNavigation: boolean; navPaddi
   printer:         { blocksNavigation: true  },
   vending:         { blocksNavigation: true  },
   atm:             { blocksNavigation: true  },
+  shop:            { blocksNavigation: true  },
   whiteboard:      { blocksNavigation: true  },
   computer:        { blocksNavigation: false }, // desk item
   keyboard:        { blocksNavigation: false }, // desk decoration

@@ -14,7 +14,12 @@ import {
   X,
 } from "lucide-react";
 
+import { PackagedSkillSetupModal } from "@/features/office/components/panels/PackagedSkillSetupModal";
 import type { OfficeSkillsMarketplaceController } from "@/features/office/hooks/useOfficeSkillsMarketplace";
+import {
+  getPackagedSkillSetupDefinition,
+  type PackagedSkillSetupValues,
+} from "@/lib/skills/packaged-setup";
 import type { SkillMarketplaceCollectionId, SkillMarketplaceEntry } from "@/lib/skills/marketplace";
 import { buildSkillMarketplaceCollections } from "@/lib/skills/marketplace";
 import { buildAgentSkillsAllowlistSet, deriveAgentSkillsAccessMode } from "@/lib/skills/presentation";
@@ -102,6 +107,10 @@ export function SkillsMarketplacePanel({
   const [query, setQuery] = useState("");
   const [activeFilter, setActiveFilter] = useState<MarketplaceFilter>("claw3d");
   const [detailSkillKey, setDetailSkillKey] = useState<string | null>(null);
+  const [installSetupSkillKey, setInstallSetupSkillKey] = useState<string | null>(null);
+  const [installSetupDrafts, setInstallSetupDrafts] = useState<Record<string, PackagedSkillSetupValues>>(
+    {}
+  );
 
   const entries = useMemo(
     () => marketplace.marketplaceSkills ?? marketplace.skillsReport?.skills ?? [],
@@ -175,6 +184,38 @@ export function SkillsMarketplacePanel({
     collections
       .flatMap((collection) => collection.entries)
       .find((entry) => entry.skill.skillKey === detailSkillKey) ?? null;
+  const installSetupSkill = installSetupSkillKey
+    ? marketplace.packagedSkillsByKey.get(installSetupSkillKey) ?? null
+    : null;
+  const installSetupDefinition = installSetupSkill
+    ? getPackagedSkillSetupDefinition(installSetupSkill.packageId)
+    : null;
+
+  const triggerPackagedInstall = (skillKey: string) => {
+    const packagedSkill = marketplace.packagedSkillsByKey.get(skillKey);
+    if (!packagedSkill) {
+      void marketplace.handleInstallPackagedSkill(skillKey).catch(() => undefined);
+      return;
+    }
+    const definition = getPackagedSkillSetupDefinition(packagedSkill.packageId);
+    if (!definition) {
+      void marketplace.handleInstallPackagedSkill(skillKey).catch(() => undefined);
+      return;
+    }
+    setInstallSetupSkillKey(skillKey);
+  };
+
+  const submitPackagedInstallSetup = async (
+    skillKey: string,
+    values: PackagedSkillSetupValues
+  ) => {
+    setInstallSetupDrafts((current) => ({
+      ...current,
+      [skillKey]: values,
+    }));
+    await marketplace.handleInstallPackagedSkill(skillKey, values);
+    setInstallSetupSkillKey(null);
+  };
 
   return (
     <section className="relative flex h-full min-h-0 flex-col">
@@ -390,7 +431,7 @@ export function SkillsMarketplacePanel({
                     packageOnly
                       ? {
                           label: "Install skill",
-                          run: () => void marketplace.handleInstallPackagedSkill(entry.skill.skillKey),
+                          run: () => triggerPackagedInstall(entry.skill.skillKey),
                           icon: Download,
                         }
                       : entry.readiness === "needs-setup" && entry.installable
@@ -673,7 +714,7 @@ export function SkillsMarketplacePanel({
               !detailEntry.skill.baseDir.trim() ? (
                 <button
                   type="button"
-                  onClick={() => void marketplace.handleInstallPackagedSkill(detailEntry.skill.skillKey)}
+                  onClick={() => triggerPackagedInstall(detailEntry.skill.skillKey)}
                   disabled={marketplace.busySkillKey === detailEntry.skill.skillKey}
                   className="inline-flex items-center gap-1 rounded border border-cyan-500/25 bg-cyan-500/10 px-2 py-1.5 font-mono text-[10px] uppercase tracking-[0.14em] text-cyan-100 transition-colors hover:border-cyan-400/40 disabled:cursor-not-allowed disabled:opacity-45"
                 >
@@ -736,6 +777,23 @@ export function SkillsMarketplacePanel({
             </div>
           </div>
         </div>
+      ) : null}
+      {installSetupSkill && installSetupDefinition ? (
+        <PackagedSkillSetupModal
+          skillName={installSetupSkill.name}
+          definition={installSetupDefinition}
+          initialValues={installSetupDrafts[installSetupSkill.skillKey]}
+          busy={marketplace.busySkillKey === installSetupSkill.skillKey}
+          errorMessage={
+            marketplace.message?.kind === "error" ? marketplace.message.text : marketplace.error
+          }
+          onClose={() => {
+            if (!marketplace.busySkillKey) {
+              setInstallSetupSkillKey(null);
+            }
+          }}
+          onSubmit={(values) => submitPackagedInstallSetup(installSetupSkill.skillKey, values)}
+        />
       ) : null}
     </section>
   );

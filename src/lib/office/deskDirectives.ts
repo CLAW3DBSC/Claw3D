@@ -8,6 +8,7 @@ export type OfficeDeskDirective = "desk" | "release";
 export type OfficeGithubDirective = "github" | "release";
 export type OfficeGymDirective = "gym" | "release";
 export type OfficeQaDirective = "qa_lab" | "release";
+export type OfficeShopDirective = "shop" | "release";
 export type OfficeStandupDirective = "standup";
 export type OfficeCallPhase = "needs_message" | "ready_to_call";
 export type OfficeTextPhase = "needs_message" | "ready_to_send";
@@ -25,6 +26,7 @@ export type OfficeIntentSnapshot = {
   normalized: string;
   desk: OfficeDeskDirective | null;
   github: OfficeGithubDirective | null;
+  shop: OfficeShopDirective | null;
   gym:
     | {
         directive: OfficeGymDirective;
@@ -244,6 +246,38 @@ const resolveOfficeQaDirectiveFromNormalized = (
     : null;
 };
 
+const resolveOfficeShopDirectiveFromNormalized = (
+  normalized: string,
+): OfficeShopDirective | null => {
+  const shopReleasePatterns = [
+    /\bleave\s+(?:the\s+)?(?:shop|store|grocery(?:\s+room)?)\b/,
+    /\bexit\s+(?:the\s+)?(?:shop|store|grocery(?:\s+room)?)\b/,
+    /\bdone\s+shopping\b/,
+    /\bstop\s+shopping\b/,
+    /\bleave\s+amazon\b/,
+  ];
+  if (shopReleasePatterns.some((pattern) => pattern.test(normalized))) {
+    return "release";
+  }
+
+  const shopIntentPatterns = [
+    /\bbuy(?:\s+\w+){0,3}\s+on\s+amazon\b/,
+    /\border(?:\s+\w+){0,3}\s+on\s+amazon\b/,
+    /\breorder\s+on\s+amazon\b/,
+    /\bshop\s+on\s+amazon\b/,
+    /\bpurchase(?:\s+\w+){0,3}\s+on\s+amazon\b/,
+    /\bamazon\s+order\b/,
+    /\bamazon\s+shopping\b/,
+    /\bgo\s+shopping\b/,
+    /\bgo\s+to\s+(?:the\s+)?(?:shop|store|grocery(?:\s+room)?)\b/,
+    /\bwalk\s+to\s+(?:the\s+)?(?:shop|store|grocery(?:\s+room)?)\b/,
+    /\bhead\s+to\s+(?:the\s+)?(?:shop|store|grocery(?:\s+room)?)\b/,
+  ];
+  return shopIntentPatterns.some((pattern) => pattern.test(normalized))
+    ? "shop"
+    : null;
+};
+
 const resolveOfficeStandupDirectiveFromNormalized = (
   normalized: string,
 ): OfficeStandupDirective | null => {
@@ -416,6 +450,7 @@ export const resolveOfficeIntentSnapshot = (
       normalized: "",
       desk: null,
       github: null,
+      shop: null,
       gym: null,
       qa: null,
       art: null,
@@ -435,6 +470,7 @@ export const resolveOfficeIntentSnapshot = (
     normalized,
   );
   const qaDirective = resolveOfficeQaDirectiveFromNormalized(normalized);
+  const shopDirective = resolveOfficeShopDirectiveFromNormalized(normalized);
   const gymSkillDirective = resolveOfficeGymSkillDirectiveFromNormalized(normalized);
   const standupDirective = resolveOfficeStandupDirectiveFromNormalized(normalized);
   const callDirective = resolveOfficeCallDirectiveFromNormalized(normalized);
@@ -465,6 +501,7 @@ export const resolveOfficeIntentSnapshot = (
           ? "github"
           : "release"
         : null,
+    shop: shopDirective,
     gym: gymDirective,
     qa: qaDirective,
     art: null,
@@ -500,6 +537,10 @@ export const resolveOfficeQaDirective = (
   value: string | null | undefined,
 ): OfficeQaDirective | null => resolveOfficeIntentSnapshot(value).qa;
 
+export const resolveOfficeShopDirective = (
+  value: string | null | undefined,
+): OfficeShopDirective | null => resolveOfficeIntentSnapshot(value).shop;
+
 export const resolveOfficeStandupDirective = (
   value: string | null | undefined,
 ): OfficeStandupDirective | null => resolveOfficeIntentSnapshot(value).standup;
@@ -517,6 +558,7 @@ const resolveTranscriptDirective = <
     | OfficeDeskDirective
     | OfficeGithubDirective
     | OfficeGymDirective
+    | OfficeShopDirective
     | OfficeQaDirective
     | OfficeStandupDirective,
 >(

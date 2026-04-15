@@ -35,6 +35,7 @@ import {
   PhoneBoothImmersiveScreen,
   type PhoneCallStep,
 } from "@/features/office/screens/PhoneBoothImmersiveScreen";
+import { ShopImmersiveScreen } from "@/features/office/screens/ShopImmersiveScreen";
 import {
   SmsBoothImmersiveScreen,
   type TextMessageStep,
@@ -85,8 +86,10 @@ import {
   ensureOfficePhoneBooth,
   ensureOfficePingPongTable,
   ensureOfficeQaLab,
+  ensureOfficeShopAnnexShelves,
   ensureOfficeSmsBooth,
   ensureOfficeJukebox,
+  ensureOfficeShop,
   ensureOfficeServerRoom,
   isRetiredPingPongLamp,
   materializeDefaults,
@@ -128,6 +131,7 @@ import {
   GYM_DEFAULT_TARGET,
   MEETING_OVERFLOW_LOCATIONS,
   QA_LAB_DEFAULT_TARGET,
+  resolveShopRoute,
   resolveDeskIndexForItem,
   resolveGymRoute,
   resolvePhoneBoothRoute,
@@ -144,6 +148,7 @@ import {
   markGymRoomMigrationApplied,
   markPhoneBoothMigrationApplied,
   markQaLabMigrationApplied,
+  markShopAnnexShelvesMigrationApplied,
   markSmsBoothMigrationApplied,
   markServerRoomMigrationApplied,
   saveFurniture,
@@ -159,7 +164,9 @@ import type {
 import type { NavGrid } from "@/features/retro-office/core/navigation";
 import type { OfficeLayoutSnapshot } from "@/lib/office/layoutSnapshot";
 import { AgentModel as AgentObjectModel } from "@/features/retro-office/objects/agents";
+import { GroceryShelfModel as InteractiveGroceryShelfModel } from "@/features/retro-office/objects/GroceryShelf";
 import { JukeboxModel as InteractiveJukeboxModel } from "@/features/retro-office/objects/Jukebox";
+import { ShopModel as InteractiveShopModel } from "@/features/retro-office/objects/Shop";
 import {
   FurnitureModel as GenericFurnitureModel,
   InstancedFurnitureItems as InstancedFurnitureItemsModel,
@@ -347,6 +354,12 @@ const PALETTE: PaletteEntry[] = [
     icon: "📚",
     defaults: { w: 80, h: 120 },
   },
+  {
+    type: "grocery_shelf",
+    label: "Grocery Shelf",
+    icon: "🛒",
+    defaults: { w: 70, h: 130, facing: 0 },
+  },
   { type: "plant", label: "Plant", icon: "🪴", defaults: {} },
   {
     type: "beanbag",
@@ -531,6 +544,19 @@ const ReadOnlyFurnitureClone = memo(function ReadOnlyFurnitureClone({
           <InteractiveAtmMachineModel
             key={item._uid}
             item={item}
+            isSelected={false}
+            isHovered={false}
+            editMode={false}
+            onPointerDown={NOOP_FURNITURE_UID_HANDLER}
+            onPointerOver={NOOP_FURNITURE_UID_HANDLER}
+            onPointerOut={NOOP_FURNITURE_HANDLER}
+          />
+        ) : item.type === "shop" ? (
+          <InteractiveShopModel
+            key={item._uid}
+            item={item}
+            active={false}
+            enabled={false}
             isSelected={false}
             isHovered={false}
             editMode={false}
@@ -770,6 +796,17 @@ const ReadOnlyFurnitureClone = memo(function ReadOnlyFurnitureClone({
             onPointerOver={NOOP_FURNITURE_UID_HANDLER}
             onPointerOut={NOOP_FURNITURE_HANDLER}
           />
+        ) : item.type === "grocery_shelf" ? (
+          <InteractiveGroceryShelfModel
+            key={item._uid}
+            item={item}
+            isSelected={false}
+            isHovered={false}
+            editMode={false}
+            onPointerDown={NOOP_FURNITURE_UID_HANDLER}
+            onPointerOver={NOOP_FURNITURE_UID_HANDLER}
+            onPointerOut={NOOP_FURNITURE_HANDLER}
+          />
         ) : (
           <GenericFurnitureModel
             key={item._uid}
@@ -863,6 +900,7 @@ function useAgentTick(
   deskHoldByAgentId: Record<string, boolean> = {},
   danceUntilByAgentId: Record<string, number> = {},
   gymHoldByAgentId: Record<string, boolean> = {},
+  shopHoldByAgentId: Record<string, boolean> = {},
   smsBoothHoldByAgentId: Record<string, boolean> = {},
   phoneBoothHoldByAgentId: Record<string, boolean> = {},
   qaHoldByAgentId: Record<string, boolean> = {},
@@ -1015,6 +1053,7 @@ function useAgentTick(
       }
       const explicitDeskHold = Boolean(deskHoldByAgentId[agent.id]);
       const explicitGymHold = Boolean(gymHoldByAgentId[agent.id]);
+      const explicitShopHold = Boolean(shopHoldByAgentId[agent.id]);
       const explicitSmsBoothHold = Boolean(smsBoothHoldByAgentId[agent.id]);
       const explicitPhoneBoothHold = Boolean(phoneBoothHoldByAgentId[agent.id]);
       const explicitQaHold = Boolean(qaHoldByAgentId[agent.id]);
@@ -1073,6 +1112,8 @@ function useAgentTick(
         (furnitureRef.current ?? []).find(
           (item) => item.type === "phone_booth",
         ) ?? null;
+      const shopItem =
+        (furnitureRef.current ?? []).find((item) => item.type === "shop") ?? null;
 
       if (agent.status === "working" && !explicitDeskHold && deskPos)
         stickyUntilRef.current.set(agent.id, now + DESK_STICKY_MS);
@@ -1083,6 +1124,7 @@ function useAgentTick(
           : explicitMeetingHold ||
               explicitDeskHold ||
               explicitGymHold ||
+              explicitShopHold ||
               explicitSmsBoothHold ||
               explicitPhoneBoothHold ||
               explicitQaHold ||
@@ -1271,6 +1313,47 @@ function useAgentTick(
               ? "standing"
               : "walking";
           ns.facing = serverRoomRoute.facing;
+        } else if (explicitShopHold) {
+          const shopRoute = resolveShopRoute(shopItem, existing.x, existing.y);
+          ns.pingPongUntil = undefined;
+          ns.pingPongTargetX = undefined;
+          ns.pingPongTargetY = undefined;
+          ns.pingPongFacing = undefined;
+          ns.pingPongPartnerId = undefined;
+          ns.pingPongTableUid = undefined;
+          ns.pingPongSide = undefined;
+          ns.walkSpeed =
+            existing.pingPongPreviousWalkSpeed ?? existing.walkSpeed;
+          ns.pingPongPreviousWalkSpeed = undefined;
+          ns.interactionTarget = "shop";
+          ns.smsBoothStage = undefined;
+          ns.phoneBoothStage = undefined;
+          ns.serverRoomStage = undefined;
+          ns.gymStage = undefined;
+          ns.qaLabStage = undefined;
+          ns.qaLabStationType = undefined;
+          ns.workoutStyle = undefined;
+          const targetChanged =
+            existing.targetX !== shopRoute.targetX ||
+            existing.targetY !== shopRoute.targetY;
+          ns.targetX = shopRoute.targetX;
+          ns.targetY = shopRoute.targetY;
+          if (targetChanged) {
+            ns.path = planPath(
+              existing.x,
+              existing.y,
+              shopRoute.targetX,
+              shopRoute.targetY,
+            );
+          }
+          ns.state =
+            Math.hypot(
+              existing.x - shopRoute.targetX,
+              existing.y - shopRoute.targetY,
+            ) < 15
+              ? "standing"
+              : "walking";
+          ns.facing = shopRoute.facing;
         } else if (explicitSmsBoothHold) {
           const smsBoothRoute = resolveSmsBoothRoute(
             smsBoothItem,
@@ -1456,6 +1539,7 @@ function useAgentTick(
               existing.y,
               gymWorkoutPos,
             );
+            const shopRoute = resolveShopRoute(shopItem, existing.x, existing.y);
             const qaLabRoute = resolveQaLabRoute(
               existing.x,
               existing.y,
@@ -1466,6 +1550,8 @@ function useAgentTick(
                 ? { x: meetingTarget.x, y: meetingTarget.y }
                 : explicitGymHold
                   ? { x: gymRoute.targetX, y: gymRoute.targetY }
+                  : explicitShopHold
+                    ? { x: shopRoute.targetX, y: shopRoute.targetY }
                   : explicitSmsBoothHold
                     ? {
                         x: smsBoothRoute.targetX,
@@ -1506,6 +1592,8 @@ function useAgentTick(
               ? "meeting_room"
               : explicitGymHold
                 ? "gym"
+                : explicitShopHold
+                  ? "shop"
                 : explicitSmsBoothHold
                   ? "sms_booth"
                   : explicitPhoneBoothHold
@@ -1518,18 +1606,21 @@ function useAgentTick(
             ns.phoneBoothStage =
               explicitMeetingHold ||
               explicitGymHold ||
+              explicitShopHold ||
               explicitSmsBoothHold ||
               !explicitPhoneBoothHold
                 ? undefined
                 : phoneBoothRoute.stage;
             ns.smsBoothStage =
-              explicitMeetingHold || explicitGymHold || !explicitSmsBoothHold
+              explicitMeetingHold || explicitGymHold || explicitShopHold || !explicitSmsBoothHold
                 ? undefined
                 : smsBoothRoute.stage;
             ns.serverRoomStage = explicitMeetingHold
               ? undefined
               : explicitGymHold
                 ? undefined
+                : explicitShopHold
+                  ? undefined
                 : explicitSmsBoothHold
                   ? undefined
                   : explicitPhoneBoothHold
@@ -1544,6 +1635,8 @@ function useAgentTick(
                 : undefined;
             ns.qaLabStage = explicitMeetingHold
               ? undefined
+              : explicitShopHold
+                ? undefined
               : explicitSmsBoothHold
                 ? undefined
                 : explicitPhoneBoothHold
@@ -1602,6 +1695,7 @@ function useAgentTick(
         const smsBoothRoute = resolveSmsBoothRoute(smsBoothItem, sx, sy);
         const phoneBoothRoute = resolvePhoneBoothRoute(phoneBoothItem, sx, sy);
         const gymRoute = resolveGymRoute(sx, sy, gymWorkoutPos);
+        const shopRoute = resolveShopRoute(shopItem, sx, sy);
         const qaLabRoute = resolveQaLabRoute(sx, sy, qaStationPos);
         const initialTarget =
           effectiveStatus === "working"
@@ -1615,6 +1709,11 @@ function useAgentTick(
                     x: gymRoute.targetX,
                     y: gymRoute.targetY,
                   }
+                : explicitShopHold
+                  ? {
+                      x: shopRoute.targetX,
+                      y: shopRoute.targetY,
+                    }
                 : explicitSmsBoothHold
                   ? {
                       x: smsBoothRoute.targetX,
@@ -1650,6 +1749,7 @@ function useAgentTick(
             effectiveStatus === "working" &&
             (explicitMeetingHold ||
               explicitGymHold ||
+              explicitShopHold ||
               explicitSmsBoothHold ||
               explicitPhoneBoothHold ||
               explicitQaHold ||
@@ -1661,6 +1761,8 @@ function useAgentTick(
             ? "meeting_room"
             : explicitGymHold
               ? "gym"
+              : explicitShopHold
+                ? "shop"
               : explicitSmsBoothHold
                 ? "sms_booth"
                 : explicitPhoneBoothHold
@@ -1673,12 +1775,13 @@ function useAgentTick(
                         ? "desk"
                         : undefined,
           smsBoothStage:
-            explicitMeetingHold || explicitGymHold || !explicitSmsBoothHold
+            explicitMeetingHold || explicitGymHold || explicitShopHold || !explicitSmsBoothHold
               ? undefined
               : smsBoothRoute.stage,
           phoneBoothStage:
             explicitMeetingHold ||
             explicitGymHold ||
+            explicitShopHold ||
             explicitSmsBoothHold ||
             !explicitPhoneBoothHold
               ? undefined
@@ -1686,6 +1789,7 @@ function useAgentTick(
           serverRoomStage:
             explicitMeetingHold ||
             explicitGymHold ||
+            explicitShopHold ||
             explicitSmsBoothHold ||
             explicitPhoneBoothHold ||
             !explicitGithubHold
@@ -1697,6 +1801,7 @@ function useAgentTick(
               : gymRoute.stage,
           qaLabStage:
             explicitMeetingHold ||
+            explicitShopHold ||
             explicitSmsBoothHold ||
             explicitPhoneBoothHold ||
             !explicitQaHold
@@ -1730,6 +1835,7 @@ function useAgentTick(
     furnitureRef,
     gymHoldByAgentId,
     gymWorkoutLocations,
+    shopHoldByAgentId,
     smsBoothHoldByAgentId,
     phoneBoothHoldByAgentId,
     qaHoldByAgentId,
@@ -2331,6 +2437,8 @@ export function RetroOffice3D({
   monitorAgentId = null,
   monitorByAgentId = EMPTY_MONITOR_MAP,
   githubSkill = null,
+  amazonOrderingEnabled = false,
+  shopOrderCompletionSignal = 0,
   taskManagerEnabled = false,
   soundclawEnabled = false,
   officeTitle = "Luke Headquarters",
@@ -2390,6 +2498,7 @@ export function RetroOffice3D({
   onQaLabDismiss,
   onOpenGithubSkillSetup,
   onJukeboxInteract,
+  onShopInteract,
   onKanbanInteract,
   taskBoardAgents = [],
   taskBoardCardsByStatus = {
@@ -2422,6 +2531,7 @@ export function RetroOffice3D({
     | "githubHoldByAgentId"
     | "gymHoldByAgentId"
     | "phoneBoothHoldByAgentId"
+    | "shopHoldByAgentId"
     | "smsBoothHoldByAgentId"
     | "qaHoldByAgentId"
     | "jukeboxHoldByAgentId"
@@ -2444,6 +2554,8 @@ export function RetroOffice3D({
   monitorAgentId?: string | null;
   monitorByAgentId?: OfficeDeskMonitorMap;
   githubSkill?: SkillStatusEntry | null;
+  amazonOrderingEnabled?: boolean;
+  shopOrderCompletionSignal?: number;
   taskManagerEnabled?: boolean;
   soundclawEnabled?: boolean;
   officeTitle?: string;
@@ -2509,6 +2621,7 @@ export function RetroOffice3D({
   onQaLabDismiss?: () => void;
   onOpenGithubSkillSetup?: () => void;
   onJukeboxInteract?: () => void;
+  onShopInteract?: () => void;
   onKanbanInteract?: () => void;
   taskBoardAgents?: AgentState[];
   taskBoardCardsByStatus?: Record<TaskBoardStatus, TaskBoardCard[]>;
@@ -2561,25 +2674,32 @@ export function RetroOffice3D({
     (githubReviewAgentId
       ? { [githubReviewAgentId]: true }
       : EMPTY_BOOLEAN_RECORD);
+  const resolvedShopHoldByAgentId =
+    animationState?.shopHoldByAgentId ?? EMPTY_BOOLEAN_RECORD;
   const resolvedJukeboxHoldByAgentId =
     animationState?.jukeboxHoldByAgentId ?? EMPTY_BOOLEAN_RECORD;
+  const isShopActive = Object.values(resolvedShopHoldByAgentId).some(Boolean);
   const isJukeboxActive = Object.values(resolvedJukeboxHoldByAgentId).some(
     Boolean,
   );
 
-  const [furniture, setFurniture] = useState<FurnitureItem[]>(() =>
-    ensureOfficeKanbanBoard(
-      ensureOfficeJukebox(
-        ensureOfficeQaLab(
-          ensureOfficeGymRoom(
-            ensureOfficeServerRoom(
-              ensureOfficePhoneBooth(
-                ensureOfficeSmsBooth(
-                  ensureOfficeAtm(
-                    ensureOfficePingPongTable(
-                      (
-                        loadFurniture(storageNamespace) ?? materializeDefaults()
-                      ).filter((item) => !isRetiredPingPongLamp(item)),
+  const buildHydratedFurniture = useCallback(
+    (items: FurnitureItem[]) =>
+      ensureOfficeKanbanBoard(
+        ensureOfficeJukebox(
+          ensureOfficeShop(
+            ensureOfficeQaLab(
+              ensureOfficeGymRoom(
+                ensureOfficeServerRoom(
+                  ensureOfficePhoneBooth(
+                    ensureOfficeSmsBooth(
+                      ensureOfficeAtm(
+                        ensureOfficeShopAnnexShelves(
+                          ensureOfficePingPongTable(
+                            items.filter((item) => !isRetiredPingPongLamp(item)),
+                          ),
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -2588,7 +2708,11 @@ export function RetroOffice3D({
           ),
         ),
       ),
-    ),
+    [],
+  );
+
+  const [furniture, setFurniture] = useState<FurnitureItem[]>(() =>
+    buildHydratedFurniture(loadFurniture(storageNamespace) ?? materializeDefaults()),
   );
   const defaultRemoteLayoutFurniture = useMemo(
     () =>
@@ -2743,6 +2867,8 @@ export function RetroOffice3D({
   const [monitorImmersiveReady, setMonitorImmersiveReady] = useState(false);
   const [activeAtmUid, setActiveAtmUid] = useState<string | null>(null);
   const [atmImmersiveReady, setAtmImmersiveReady] = useState(false);
+  const [activeShopUid, setActiveShopUid] = useState<string | null>(null);
+  const [shopImmersiveReady, setShopImmersiveReady] = useState(false);
   const [phoneBoothCommandArrived, setPhoneBoothCommandArrived] =
     useState(false);
   const [phoneBoothImmersiveReady, setPhoneBoothImmersiveReady] =
@@ -2815,6 +2941,10 @@ export function RetroOffice3D({
 
   useEffect(() => {
     markQaLabMigrationApplied(storageNamespace);
+  }, [storageNamespace]);
+
+  useEffect(() => {
+    markShopAnnexShelvesMigrationApplied(storageNamespace);
   }, [storageNamespace]);
 
   useEffect(() => {
@@ -2926,6 +3056,7 @@ export function RetroOffice3D({
     resolvedDeskHoldByAgentId,
     resolvedDanceUntilByAgentId,
     resolvedGymHoldByAgentId,
+    resolvedShopHoldByAgentId,
     resolvedSmsBoothHoldByAgentId,
     resolvedPhoneBoothHoldByAgentId,
     resolvedQaHoldByAgentId,
@@ -3033,6 +3164,15 @@ export function RetroOffice3D({
         : null,
     [activeAtmUid, furniture],
   );
+  const activeShop = useMemo(
+    () =>
+      activeShopUid
+        ? (furniture.find(
+            (item) => item._uid === activeShopUid && item.type === "shop",
+          ) ?? null)
+        : null,
+    [activeShopUid, furniture],
+  );
   const activeKanbanBoard = useMemo(
     () =>
       activeKanbanUid
@@ -3048,6 +3188,7 @@ export function RetroOffice3D({
     [furniture],
   );
   const atmImmersive = Boolean(activeAtm && atmImmersiveReady);
+  const shopImmersive = Boolean(activeShop && shopImmersiveReady);
   const activeSmsBooth = useMemo(
     () => furniture.find((item) => item.type === "sms_booth") ?? null,
     [furniture],
@@ -3273,6 +3414,17 @@ export function RetroOffice3D({
       };
     }
   }, [activeAtmUid, followAgentId]);
+
+  useEffect(() => {
+    if (followAgentId && activeShopUid) {
+      const timer = window.setTimeout(() => {
+        setFollowAgentId(null);
+      }, 0);
+      return () => {
+        window.clearTimeout(timer);
+      };
+    }
+  }, [activeShopUid, followAgentId]);
 
   useEffect(() => {
     if (followAgentId && smsBoothAgentId) {
@@ -3562,6 +3714,17 @@ export function RetroOffice3D({
   }, [activeAtmUid, monitorAgentId]);
 
   useEffect(() => {
+    if (monitorAgentId && activeShopUid) {
+      const timer = window.setTimeout(() => {
+        setActiveShopUid(null);
+      }, 0);
+      return () => {
+        window.clearTimeout(timer);
+      };
+    }
+  }, [activeShopUid, monitorAgentId]);
+
+  useEffect(() => {
     if (monitorAgentId && activeGithubTerminalUid) {
       const timer = window.setTimeout(() => {
         setActiveGithubTerminalUid(null);
@@ -3595,6 +3758,17 @@ export function RetroOffice3D({
   }, [activeAtmUid, activeGithubTerminalUid]);
 
   useEffect(() => {
+    if (activeShopUid && activeGithubTerminalUid) {
+      const timer = window.setTimeout(() => {
+        setActiveGithubTerminalUid(null);
+      }, 0);
+      return () => {
+        window.clearTimeout(timer);
+      };
+    }
+  }, [activeGithubTerminalUid, activeShopUid]);
+
+  useEffect(() => {
     if (activeAtmUid && activeQaTerminalUid) {
       const timer = window.setTimeout(() => {
         setActiveQaTerminalUid(null);
@@ -3604,6 +3778,17 @@ export function RetroOffice3D({
       };
     }
   }, [activeAtmUid, activeQaTerminalUid]);
+
+  useEffect(() => {
+    if (activeShopUid && activeQaTerminalUid) {
+      const timer = window.setTimeout(() => {
+        setActiveQaTerminalUid(null);
+      }, 0);
+      return () => {
+        window.clearTimeout(timer);
+      };
+    }
+  }, [activeQaTerminalUid, activeShopUid]);
 
   useEffect(() => {
     if (!smsBoothAgentId) return;
@@ -4207,6 +4392,33 @@ export function RetroOffice3D({
       window.clearTimeout(timer);
     };
   }, [activeAtmUid]);
+
+  useEffect(() => {
+    const resetTimer = window.setTimeout(() => {
+      setShopImmersiveReady(false);
+    }, 0);
+    if (!activeShopUid) {
+      return () => {
+        window.clearTimeout(resetTimer);
+      };
+    }
+    const timer = window.setTimeout(() => {
+      setShopImmersiveReady(true);
+    }, 900);
+    return () => {
+      window.clearTimeout(resetTimer);
+      window.clearTimeout(timer);
+    };
+  }, [activeShopUid]);
+  useEffect(() => {
+    if (!shopOrderCompletionSignal) return;
+    const timer = window.setTimeout(() => {
+      setActiveShopUid(null);
+    }, 0);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [shopOrderCompletionSignal]);
 
   useEffect(() => {
     const resetTimer = window.setTimeout(() => {
@@ -4984,7 +5196,7 @@ export function RetroOffice3D({
         .filter((item) => item.type === "desk_cubicle")
         .map((item) => item._uid),
     );
-    setFurniture(materializeDefaults());
+    setFurniture(buildHydratedFurniture(materializeDefaults()));
     setSelectedUid(null);
     setDrag({ kind: "idle" });
     setGhostPos(null);
@@ -5487,6 +5699,22 @@ export function RetroOffice3D({
                     onPointerOut={handleFurniturePointerOut}
                     onClick={handleDeskClick}
                   />
+                ) : item.type === "shop" ? (
+                  <InteractiveShopModel
+                    key={item._uid}
+                    item={item}
+                    active={isShopActive}
+                    enabled={amazonOrderingEnabled}
+                    isSelected={item._uid === selectedUid}
+                    isHovered={item._uid === hoverUid}
+                    editMode={editMode}
+                    onPointerDown={handleFurniturePointerDown}
+                    onPointerOver={handleFurniturePointerOver}
+                    onPointerOut={handleFurniturePointerOut}
+                    onClick={
+                      editMode ? handleDeskClick : () => onShopInteract?.()
+                    }
+                  />
                 ) : item.type === "jukebox" ? (
                   <InteractiveJukeboxModel
                     key={item._uid}
@@ -5750,6 +5978,18 @@ export function RetroOffice3D({
                     onPointerDown={handleFurniturePointerDown}
                     onPointerOver={handleFurniturePointerOver}
                     onPointerOut={handleFurniturePointerOut}
+                  />
+                ) : item.type === "grocery_shelf" ? (
+                  <InteractiveGroceryShelfModel
+                    key={item._uid}
+                    item={item}
+                    isSelected={item._uid === selectedUid}
+                    isHovered={item._uid === hoverUid}
+                    editMode={editMode}
+                    onPointerDown={handleFurniturePointerDown}
+                    onPointerOver={handleFurniturePointerOver}
+                    onPointerOut={handleFurniturePointerOut}
+                    onClick={handleDeskClick}
                   />
                 ) : (
                   <GenericFurnitureModel
@@ -6855,6 +7095,34 @@ export function RetroOffice3D({
               onClick={() => setActiveAtmUid(null)}
               aria-label="Close ATM view"
               className="flex h-10 w-10 items-center justify-center rounded-full border border-[#8efff2]/20 bg-[#031214]/82 text-[18px] leading-none text-[#d7fff9]/78 backdrop-blur-sm transition-colors hover:border-[#8efff2]/40 hover:text-white"
+            >
+              X
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {shopImmersive ? (
+        <div className="pointer-events-none absolute inset-0 z-20 overflow-hidden">
+          <div className="absolute inset-0 bg-black/32" />
+          <div className="absolute inset-x-0 top-0 h-[8vh] bg-[linear-gradient(180deg,rgba(0,0,0,0.92),rgba(0,0,0,0.65))]" />
+          <div className="absolute inset-x-0 bottom-0 h-[12vh] bg-[linear-gradient(0deg,rgba(0,0,0,0.94),rgba(0,0,0,0.55))]" />
+          <div className="absolute inset-y-0 left-0 w-[7vw] bg-black/92" />
+          <div className="absolute inset-y-0 right-0 w-[7vw] bg-black/92" />
+          <div className="absolute inset-[7vh_8vw_10vh_8vw] rounded-[34px] border border-[#fbbf24]/22 bg-[#090603] shadow-[0_0_0_18px_rgba(9,6,3,0.96),0_0_0_22px_rgba(251,191,36,0.16),0_28px_100px_rgba(0,0,0,0.72)]" />
+          <div className="absolute inset-[7.8vh_8.8vw_10.8vh_8.8vw] rounded-[24px] border border-[#fcd34d]/16 bg-[#120b03] shadow-[inset_0_0_0_1px_rgba(251,191,36,0.05)]" />
+          <div className="pointer-events-auto absolute inset-[8vh_9vw_11vh_9vw] overflow-hidden rounded-[22px] bg-[#100802]">
+            <ShopImmersiveScreen installed={amazonOrderingEnabled} />
+            <div className="pointer-events-none absolute inset-0 opacity-[0.08] [background-image:repeating-linear-gradient(to_bottom,rgba(255,255,255,0.22)_0px,rgba(255,255,255,0.22)_1px,transparent_2px,transparent_4px)]" />
+          </div>
+          <div className="absolute bottom-[4vh] left-1/2 h-[1.6vh] w-[16vw] -translate-x-1/2 rounded-full bg-[#171005] shadow-[0_0_0_1px_rgba(251,191,36,0.22)]" />
+          <div className="absolute bottom-[2vh] left-1/2 h-[2.2vh] w-[24vw] -translate-x-1/2 rounded-[999px] bg-[#130d04] shadow-[0_0_0_1px_rgba(251,191,36,0.18)]" />
+          <div className="pointer-events-auto absolute right-[5.2vw] top-[3.4vh]">
+            <button
+              type="button"
+              onClick={() => setActiveShopUid(null)}
+              aria-label="Close shop view"
+              className="flex h-10 w-10 items-center justify-center rounded-full border border-[#fcd34d]/20 bg-[#120a03]/82 text-[18px] leading-none text-[#fef3c7]/78 backdrop-blur-sm transition-colors hover:border-[#fcd34d]/40 hover:text-white"
             >
               X
             </button>

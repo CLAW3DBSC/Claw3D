@@ -46,6 +46,19 @@ const SKILL_MARKETPLACE_OVERRIDES: Record<
   string,
   Partial<SkillMarketplaceMetadata>
 > = {
+  "amazon-ordering": {
+    category: "Shopping",
+    tagline:
+      "Lets agents handle Amazon purchases, reorders, order-history lookup, and returns with browser automation.",
+    capabilities: [
+      "Amazon purchases",
+      "Reorders and order lookup",
+      "Return processing",
+    ],
+    featured: true,
+    editorBadge: "Browser agent",
+    hideStats: true,
+  },
   github: {
     category: "Engineering",
     tagline: "Turns repository operations into a one-step teammate workflow.",

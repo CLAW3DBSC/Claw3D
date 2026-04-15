@@ -4,6 +4,7 @@ export const OFFICE_INTERACTION_TARGETS = [
   "meeting_room",
   "gym",
   "jukebox",
+  "shop",
   "qa_lab",
   "sms_booth",
   "phone_booth",
@@ -17,6 +18,7 @@ export const OFFICE_SKILL_TRIGGER_MOVEMENT_TARGETS = [
   "github",
   "gym",
   "jukebox",
+  "shop",
   "qa_lab",
 ] as const;
 
@@ -28,6 +30,7 @@ type OfficeSkillTriggerAnimationHoldKey =
   | "githubHoldByAgentId"
   | "gymHoldByAgentId"
   | "jukeboxHoldByAgentId"
+  | "shopHoldByAgentId"
   | "qaHoldByAgentId";
 
 export const OFFICE_SKILL_TRIGGER_PLACE_REGISTRY: Record<
@@ -60,6 +63,11 @@ export const OFFICE_SKILL_TRIGGER_PLACE_REGISTRY: Record<
     interactionTarget: "jukebox",
     animationHoldKey: "jukeboxHoldByAgentId",
   },
+  shop: {
+    label: "Shop",
+    interactionTarget: "shop",
+    animationHoldKey: "shopHoldByAgentId",
+  },
   qa_lab: {
     label: "QA Lab",
     interactionTarget: "qa_lab",
@@ -82,6 +90,20 @@ export const DEFAULT_SKILL_TRIGGER_FALLBACKS_BY_SKILL_KEY: Record<
   string,
   DefaultSkillTriggerFallback
 > = {
+  "amazon-ordering": {
+    anyPhrases: [
+      "amazon",
+      "go shopping",
+      "buy something",
+      "buy on amazon",
+      "order on amazon",
+      "reorder on amazon",
+      "amazon order history",
+      "amazon return",
+    ],
+    movementTarget: "shop",
+    skipIfAlreadyThere: true,
+  },
   "todo-board": {
     anyPhrases: [
       "todo",
@@ -130,6 +152,7 @@ export const buildOfficeSkillTriggerHoldMaps = (
   githubHoldByAgentId: Record<string, boolean>;
   gymHoldByAgentId: Record<string, boolean>;
   jukeboxHoldByAgentId: Record<string, boolean>;
+  shopHoldByAgentId: Record<string, boolean>;
   qaHoldByAgentId: Record<string, boolean>;
   skillGymHoldByAgentId: Record<string, boolean>;
 } => {
@@ -138,6 +161,7 @@ export const buildOfficeSkillTriggerHoldMaps = (
     githubHoldByAgentId: {} as Record<string, boolean>,
     gymHoldByAgentId: {} as Record<string, boolean>,
     jukeboxHoldByAgentId: {} as Record<string, boolean>,
+    shopHoldByAgentId: {} as Record<string, boolean>,
     qaHoldByAgentId: {} as Record<string, boolean>,
     skillGymHoldByAgentId: {} as Record<string, boolean>,
   };

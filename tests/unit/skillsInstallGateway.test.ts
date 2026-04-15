@@ -74,6 +74,60 @@ describe("skills install gateway", () => {
     );
   });
 
+  it("includes generated setup files for packaged installs that require defaults", async () => {
+    const call = vi.fn(async (method: string) => {
+      if (method === "agents.create") {
+        return { agentId: "installer-setup" };
+      }
+      if (method === "config.get") {
+        return {
+          exists: true,
+          hash: "hash-setup",
+          config: {
+            agents: {
+              list: [{ id: "installer-setup", tools: {} }],
+            },
+          },
+        };
+      }
+      if (method === "config.set" || method === "config.patch") {
+        return { ok: true };
+      }
+      if (method === "agents.list") {
+        return { mainKey: "main" };
+      }
+      if (method === "chat.send") {
+        return { runId: "run-setup", status: "started" };
+      }
+      if (method === "agent.wait") {
+        return { ok: true };
+      }
+      throw new Error(`Unexpected method: ${method}`);
+    });
+
+    await installPackagedSkillViaGatewayAgent({
+      client: { call } as unknown as GatewayClient,
+      request: {
+        packageId: "amazon-ordering",
+        source: "openclaw-workspace",
+        workspaceDir: "/home/openclaw/workspace-demo",
+        managedSkillsDir: "/home/openclaw/.openclaw/skills",
+        setupValues: {
+          shippingAddress: "123 Main St",
+          paymentMethod: "Visa ending in 4242",
+          returnDropoff: "Whole Foods",
+        },
+      },
+    });
+
+    expect(call).toHaveBeenCalledWith(
+      "chat.send",
+      expect.objectContaining({
+        message: expect.stringContaining("skills/amazon-ordering/defaults.json"),
+      })
+    );
+  });
+
   it("cleans up the temporary installer agent when install fails", async () => {
     const call = vi.fn(async (method: string) => {
       if (method === "agents.create") {

@@ -56,6 +56,7 @@ export type RenderAgent = SceneActor & {
   smsBoothStage?: "door_outer" | "door_inner" | "typing";
   phoneBoothStage?: "door_outer" | "door_inner" | "receiver";
   serverRoomStage?: "door_outer" | "door_inner" | "terminal";
+  shopStage?: "approach" | "counter";
   gymStage?: "door_outer" | "door_inner" | "workout";
   qaLabStage?: "door_outer" | "door_inner" | "station";
   qaLabStationType?: QaLabStationType;
@@ -130,6 +131,13 @@ export type PhoneBoothRoute = {
 
 export type SmsBoothRoute = {
   stage: "door_outer" | "door_inner" | "typing";
+  targetX: number;
+  targetY: number;
+  facing: number;
+};
+
+export type ShopRoute = {
+  stage: "entrance" | "aisle" | "checkout";
   targetX: number;
   targetY: number;
   facing: number;

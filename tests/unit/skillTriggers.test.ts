@@ -12,6 +12,9 @@ import {
 
 describe("skill triggers", () => {
   it("parses packaged skill trigger definitions from SKILL.md", () => {
+    const amazonTrigger = listPackagedSkillTriggerDefinitions().find(
+      (entry) => entry.skillKey === "amazon-ordering",
+    );
     const todoTrigger = listPackagedSkillTriggerDefinitions().find(
       (entry) => entry.skillKey === "todo-board",
     );
@@ -19,6 +22,10 @@ describe("skill triggers", () => {
       (entry) => entry.skillKey === "task-manager",
     );
 
+    expect(amazonTrigger).not.toBeUndefined();
+    expect(amazonTrigger?.movementTarget).toBe("shop");
+    expect(amazonTrigger?.activationPhrases).toContain("amazon");
+    expect(amazonTrigger?.activationPhrases).toContain("amazon return");
     expect(todoTrigger).not.toBeUndefined();
     expect(todoTrigger?.movementTarget).toBe("desk");
     expect(todoTrigger?.activationPhrases).toContain("todo");
@@ -29,19 +36,19 @@ describe("skill triggers", () => {
   });
 
   it("matches the running agent's latest request against enabled skill triggers", () => {
-    const todoTrigger = listPackagedSkillTriggerDefinitions().find(
-      (entry) => entry.skillKey === "todo-board",
+    const amazonTrigger = listPackagedSkillTriggerDefinitions().find(
+      (entry) => entry.skillKey === "amazon-ordering",
     );
 
     const matched = resolveTriggeredSkillDefinition({
       isAgentRunning: true,
-      lastUserMessage: "On telegram, add this to my todo list.",
+      lastUserMessage: "On telegram, can you buy this on Amazon for me?",
       transcriptEntries: [],
-      triggers: todoTrigger ? [todoTrigger] : [],
+      triggers: amazonTrigger ? [amazonTrigger] : [],
     });
 
-    expect(matched?.skillKey).toBe("todo-board");
-    expect(matched?.movementTarget).toBe("desk");
+    expect(matched?.skillKey).toBe("amazon-ordering");
+    expect(matched?.movementTarget).toBe("shop");
   });
 
   it("does not match triggers when the agent is not running", () => {
@@ -67,6 +74,10 @@ describe("skill triggers", () => {
       "server_room",
     );
     expect(
+      DEFAULT_SKILL_TRIGGER_FALLBACKS_BY_SKILL_KEY["amazon-ordering"]
+        ?.movementTarget,
+    ).toBe("shop");
+    expect(
       DEFAULT_SKILL_TRIGGER_FALLBACKS_BY_SKILL_KEY["todo-board"]
         ?.movementTarget,
     ).toBe("desk");
@@ -78,12 +89,14 @@ describe("skill triggers", () => {
       "agent-b": "github",
       "agent-c": "gym",
       "agent-d": "qa_lab",
+      "agent-e": "shop",
     });
 
     expect(holdMaps.deskHoldByAgentId).toEqual({ "agent-a": true });
     expect(holdMaps.githubHoldByAgentId).toEqual({ "agent-b": true });
     expect(holdMaps.gymHoldByAgentId).toEqual({ "agent-c": true });
     expect(holdMaps.qaHoldByAgentId).toEqual({ "agent-d": true });
+    expect(holdMaps.shopHoldByAgentId).toEqual({ "agent-e": true });
     expect(holdMaps.skillGymHoldByAgentId).toEqual({ "agent-c": true });
   });
 });
