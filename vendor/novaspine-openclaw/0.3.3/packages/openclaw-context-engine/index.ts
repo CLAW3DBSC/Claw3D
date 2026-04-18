@@ -68,6 +68,7 @@ const CHANGE_ANSWER_CONTRACT = [
   "The user is asking for a change/history comparison.",
   "Answer with explicit previous -> current pairs for each relevant facet.",
   "If NovaSpine memory includes previous/historical and current values, include both exact values in the final answer.",
+  "If change-facts include multiple same-facet values without labels, treat them as retrieved candidates for that facet and preserve exact values.",
   "Do not collapse old values into generic wording such as shifted, changed, updated, or previous value.",
 ].join(" ");
 const CHANGE_RECALL_HINT =
@@ -226,13 +227,44 @@ function buildRecallQuery(objective: string, changeQuestion = isChangeQuestion(o
   return `${normalized}\n${CHANGE_RECALL_HINT}`;
 }
 
-function extractChangeFacts(memories: RecallMemory[], maxFacts = 8): string[] {
+function recallTopKForQuery(configuredTopK: number, changeQuestion: boolean): number {
+  return changeQuestion ? Math.max(configuredTopK, 20) : configuredTopK;
+}
+
+const EXPLICIT_CHANGE_FACT_PATTERN =
+  /(previous\/historical|historical|previous|used to|current:|replaced|changed|from .* to)/i;
+
+const CHANGE_FACT_FACETS: Array<{ prompt: RegExp; memory: RegExp }> = [
+  {
+    prompt: /\b(bag|backpack|pack|gear|carry|edc|everyday carry)\b/i,
+    memory: /\bUser\s+bag\b/i,
+  },
+  {
+    prompt: /\b(city|location|home base|move|moved|relocat(?:e|ed|ion)|from|to)\b/i,
+    memory: /\bUser\s+location\b/i,
+  },
+  {
+    prompt: /\b(coffee|drink|order|milk|espresso|cappuccino|flat white)\b/i,
+    memory: /\bUser\s+coffee_order\b/i,
+  },
+  {
+    prompt: /\b(notebook|notes?|moleskine|field notes)\b/i,
+    memory: /\bUser\s+notebook\b/i,
+  },
+];
+
+function isFacetChangeFact(content: string, objective: string): boolean {
+  if (!objective.trim()) return false;
+  return CHANGE_FACT_FACETS.some((facet) => facet.prompt.test(objective) && facet.memory.test(content));
+}
+
+function extractChangeFacts(memories: RecallMemory[], maxFacts = 8, objective = ""): string[] {
   const facts: string[] = [];
   const seen = new Set<string>();
   for (const memory of memories) {
     const content = compactText(memory.content || "", 520);
     if (!content) continue;
-    if (!/(previous\/historical|historical|previous|used to|current:|replaced|changed|from .* to)/i.test(content)) {
+    if (!EXPLICIT_CHANGE_FACT_PATTERN.test(content) && !isFacetChangeFact(content, objective)) {
       continue;
     }
     const normalized = content.toLowerCase();
@@ -369,7 +401,7 @@ function buildEnvelope(
 ): string {
   const budgets = deriveBudgets(cfg, tokenBudget);
   const sections: string[] = [`<query>${escapeXml(compactText(objective, budgets.objective))}</query>`];
-  const changeFacts = isChangeQuestion(objective) ? extractChangeFacts(memories) : [];
+  const changeFacts = isChangeQuestion(objective) ? extractChangeFacts(memories, 8, objective) : [];
   if (isChangeQuestion(objective)) {
     sections.push(`<change-answer-contract>${escapeXml(CHANGE_ANSWER_CONTRACT)}</change-answer-contract>`);
   }
@@ -522,9 +554,13 @@ function createNovaSpineContextEngine(
       let memories: RecallMemory[] = [];
       if (cfg.autoRecall && objective) {
         try {
+          const changeQuestion = isChangeQuestion(objective);
           const response = await requestJson<RecallResponse>(cfg, "/api/v1/memory/recall", {
             method: "POST",
-            body: { query: buildRecallQuery(objective), top_k: cfg.recallTopK },
+            body: {
+              query: buildRecallQuery(objective, changeQuestion),
+              top_k: recallTopKForQuery(cfg.recallTopK, changeQuestion),
+            },
           });
           memories = filterMemoryHits(response.memories || [], cfg.recallMinScore);
         } catch (error) {

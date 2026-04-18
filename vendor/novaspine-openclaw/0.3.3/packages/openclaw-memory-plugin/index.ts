@@ -289,6 +289,7 @@ const CHANGE_ANSWER_CONTRACT = [
   "The user is asking for a change/history comparison.",
   "Answer with explicit previous -> current pairs for each relevant facet.",
   "If NovaSpine memory includes previous/historical and current values, include both exact values in the final answer.",
+  "If change-facts include multiple same-facet values without labels, treat them as retrieved candidates for that facet and preserve exact values.",
   "Do not collapse old values into generic wording such as shifted, changed, updated, or previous value.",
 ].join(" ");
 const CHANGE_RECALL_HINT =
@@ -689,7 +690,38 @@ function buildRecallQuery(prompt: string, changeQuestion = isChangeQuestion(prom
   return `${normalized}\n${CHANGE_RECALL_HINT}`;
 }
 
-function extractChangeFacts(memories: RecallMemory[], maxFacts: number): string[] {
+function recallTopKForQuery(configuredTopK: number, changeQuestion: boolean): number {
+  return changeQuestion ? Math.max(configuredTopK, 20) : configuredTopK;
+}
+
+const EXPLICIT_CHANGE_FACT_PATTERN =
+  /(previous\/historical|historical|previous|used to|current:|replaced|changed|from .* to)/i;
+
+const CHANGE_FACT_FACETS: Array<{ prompt: RegExp; memory: RegExp }> = [
+  {
+    prompt: /\b(bag|backpack|pack|gear|carry|edc|everyday carry)\b/i,
+    memory: /\bUser\s+bag\b/i,
+  },
+  {
+    prompt: /\b(city|location|home base|move|moved|relocat(?:e|ed|ion)|from|to)\b/i,
+    memory: /\bUser\s+location\b/i,
+  },
+  {
+    prompt: /\b(coffee|drink|order|milk|espresso|cappuccino|flat white)\b/i,
+    memory: /\bUser\s+coffee_order\b/i,
+  },
+  {
+    prompt: /\b(notebook|notes?|moleskine|field notes)\b/i,
+    memory: /\bUser\s+notebook\b/i,
+  },
+];
+
+function isFacetChangeFact(content: string, prompt: string): boolean {
+  if (!prompt.trim()) return false;
+  return CHANGE_FACT_FACETS.some((facet) => facet.prompt.test(prompt) && facet.memory.test(content));
+}
+
+function extractChangeFacts(memories: RecallMemory[], maxFacts: number, prompt = ""): string[] {
   const facts: string[] = [];
   const seen = new Set<string>();
   for (const memory of memories) {
@@ -697,7 +729,7 @@ function extractChangeFacts(memories: RecallMemory[], maxFacts: number): string[
       .replace(/\s+/g, " ")
       .trim();
     if (!content) continue;
-    if (!/(previous\/historical|historical|previous|used to|current:|replaced|changed|from .* to)/i.test(content)) {
+    if (!EXPLICIT_CHANGE_FACT_PATTERN.test(content) && !isFacetChangeFact(content, prompt)) {
       continue;
     }
     const normalized = content.toLowerCase();
@@ -801,11 +833,12 @@ async function applyLegacyRecall(
   result: { prependContext?: string; prependSystemContext?: string; appendSystemContext?: string },
 ): Promise<void> {
   try {
+    const changeQuestion = isChangeQuestion(prompt);
     const response = await requestJson<AugmentResponse>(cfg, "/api/v1/memory/augment", {
       method: "POST",
       body: {
-        query: buildRecallQuery(prompt),
-        top_k: cfg.recallTopK,
+        query: buildRecallQuery(prompt, changeQuestion),
+        top_k: recallTopKForQuery(cfg.recallTopK, changeQuestion),
         min_score: cfg.recallMinScore,
         format: cfg.recallFormat,
         roles: cfg.roles,
@@ -2290,6 +2323,7 @@ const novaspineMemoryPlugin = {
         if (eligible) {
           const turns = extractRecentTurns(event.messages);
           const query = buildRecallQuery(buildActiveMemoryQuery(prompt, turns, activeMemory), changeQuestion);
+          const recallTopK = recallTopKForQuery(cfg.recallTopK, changeQuestion);
           try {
             const response = await requestJson<AugmentResponse>(
               { ...cfg, timeoutMs: activeMemory.timeoutMs },
@@ -2298,16 +2332,16 @@ const novaspineMemoryPlugin = {
                 method: "POST",
                 body: {
                   query,
-                  top_k: cfg.recallTopK,
+                  top_k: recallTopK,
                   min_score: cfg.recallMinScore,
                   format: "plain",
                   roles: cfg.roles,
                 },
               },
             );
-            const facts = response.count > 0 ? extractActiveMemoryFacts(response.memories, cfg.recallTopK) : [];
+            const facts = response.count > 0 ? extractActiveMemoryFacts(response.memories, recallTopK) : [];
             const changeFacts =
-              response.count > 0 && changeQuestion ? extractChangeFacts(response.memories, cfg.recallTopK) : [];
+              response.count > 0 && changeQuestion ? extractChangeFacts(response.memories, recallTopK, prompt) : [];
             const summary = response.count > 0 ? buildActiveMemorySummary(response, activeMemory) : undefined;
             await persistActiveMemoryTranscript(api, activeMemory, {
               generated_at: new Date().toISOString(),
