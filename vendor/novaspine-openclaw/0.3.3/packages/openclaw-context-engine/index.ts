@@ -54,9 +54,22 @@ const DAILY_NOTE_FILENAME_RE = /^\d{4}-\d{2}-\d{2}\.md$/;
 const CONTEXT_ENGINE_GUIDANCE = [
   "NovaSpine context-engine mode is available.",
   "Treat the injected <nova-context-engine> envelope as a compacted working set, not as ground truth.",
+  "Treat structured long-term-memory rows with exact current: and historical: values as factual memory evidence for old/new, changed, replaced, and moved-on questions.",
+  "When answering from those structured rows, preserve exact values instead of replacing them with generic wording.",
+  "For old/new questions, name the exact previous value when present; do not say previous value or unspecified instead.",
   "Prefer the envelope for continuity and compaction, and prefer explicit NovaSpine tools when the user directly asks what was remembered.",
   "Do not repeat the entire envelope back to the user unless they ask for the assembled context.",
 ].join("\n");
+
+const CHANGE_QUERY_PATTERN =
+  /\b(what changed|changed?|changes|used to|old|older|previous(?:ly)?|historical|history|replaced?|moved on|moved from|from .* to|before|now|current version|winter|spring)\b/i;
+
+const CHANGE_ANSWER_CONTRACT = [
+  "The user is asking for a change/history comparison.",
+  "Answer with explicit previous -> current pairs for each relevant facet.",
+  "If NovaSpine memory includes previous/historical and current values, include both exact values in the final answer.",
+  "Do not collapse old values into generic wording such as shifted, changed, updated, or previous value.",
+].join(" ");
 
 const configSchema = {
   type: "object",
@@ -201,6 +214,28 @@ function escapeXml(value: string): string {
     .replace(/'/g, "&apos;");
 }
 
+function isChangeQuestion(value: string): boolean {
+  return CHANGE_QUERY_PATTERN.test(value);
+}
+
+function extractChangeFacts(memories: RecallMemory[], maxFacts = 8): string[] {
+  const facts: string[] = [];
+  const seen = new Set<string>();
+  for (const memory of memories) {
+    const content = compactText(memory.content || "", 520);
+    if (!content) continue;
+    if (!/(previous\/historical|historical|previous|used to|current:|replaced|changed|from .* to)/i.test(content)) {
+      continue;
+    }
+    const normalized = content.toLowerCase();
+    if (seen.has(normalized)) continue;
+    seen.add(normalized);
+    facts.push(content);
+    if (facts.length >= maxFacts) break;
+  }
+  return facts;
+}
+
 function latestUserObjective(messages: unknown[]): string {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
@@ -326,6 +361,17 @@ function buildEnvelope(
 ): string {
   const budgets = deriveBudgets(cfg, tokenBudget);
   const sections: string[] = [`<query>${escapeXml(compactText(objective, budgets.objective))}</query>`];
+  const changeFacts = isChangeQuestion(objective) ? extractChangeFacts(memories) : [];
+  if (isChangeQuestion(objective)) {
+    sections.push(`<change-answer-contract>${escapeXml(CHANGE_ANSWER_CONTRACT)}</change-answer-contract>`);
+  }
+  if (changeFacts.length) {
+    sections.push(
+      `<change-facts count="${changeFacts.length}">\n${changeFacts
+        .map((fact, index) => `  <fact index="${index + 1}">${escapeXml(fact)}</fact>`)
+        .join("\n")}\n</change-facts>`,
+    );
+  }
   if (memories.length) {
     const perItem = Math.max(180, Math.floor(budgets.memory / memories.length));
     sections.push(
