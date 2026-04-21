@@ -6,7 +6,7 @@ A 3D workspace for AI agents.
 
 Claw3D turns AI automation into a visual workplace where agents collaborate, review code, run tests, train skills, and execute tasks inside a shared 3D environment.
 
-Built and maintained by LukeTheDev. Follow on X: [@iamlukethedev](https://x.com/iamlukethedev).
+Built and maintained by CLAW3DBSC. Follow on X: [@CLAW3DBSC](https://x.com/CLAW3DBSC).
 
 Think of it as:
 
